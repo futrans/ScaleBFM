@@ -1,0 +1,33 @@
+
+smplx_pose_modifier:
+  pelvis: [90, 0, 90]
+  # left_shoulder: [0, 0, -90]
+  # right_shoulder: [0, 0, 90]
+  # left_elbow: [0, -90, 0]
+  # right_elbow: [0, 90, 0]
+
+robot_pose_modifier:
+  left_shoulder_roll_joint: 1.57
+  left_elbow_joint: 1.57
+  # left_ankle_pitch_joint: 0.3
+  right_shoulder_roll_joint: -1.57
+  right_elbow_joint: 1.57
+  # right_ankle_pitch_joint: 0.3
+
+joint_matches: 
+  - ["pelvis", "pelvis"]
+  - ["left_hip_roll_link", "left_hip"]
+  - ["left_knee_link", "left_knee"]
+  - ["left_ankle_roll_link", "left_ankle"]
+  - ["left_toe_link", "left_foot"]
+  - ["right_hip_roll_link", "right_hip"]
+  - ["right_knee_link", "right_knee"]
+  - ["right_ankle_roll_link", "right_ankle"]
+  - ["right_toe_link", "right_foot"]
+  - ["spine_link", "spine3"]
+  - ["left_shoulder_roll_link", "left_shoulder"]
+  - ["left_elbow_link", "left_elbow"]
+  - ["left_wrist_yaw_link", "left_wrist"] # weishuai: Use Wrist to replace Hand (Recover if necessary...)
+  - ["right_shoulder_roll_link", "right_shoulder"]
+  - ["right_elbow_link", "right_elbow"]
+  - ["right_wrist_yaw_link", "right_wrist"]

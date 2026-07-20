@@ -1,0 +1,130 @@
+robot_root_name: pelvis
+human_root_name: C_pelvis0001_bind_JNT
+ground_height: 0.0
+human_height_assumption: 1.8
+
+human_scale_table: 
+  C_pelvis0001_bind_JNT: 1.0
+  L_legUpper0001_bind_JNT: 1.0
+  L_legLower0001_bind_JNT: 1.0
+  LeftFootMod: 1.0
+  R_legUpper0001_bind_JNT: 1.0
+  R_legLower0001_bind_JNT: 1.0
+  RightFootMod: 1.0
+  C_spine0003_bind_JNT: 1.0
+  L_armUpper0001_bind_JNT: 1.0
+  L_armLower0001_bind_JNT: 1.0
+  L_hand0001_bind_JNT: 1.0
+  R_armUpper0001_bind_JNT: 1.0
+  R_armLower0001_bind_JNT: 1.0
+  R_hand0001_bind_JNT: 1.0
+
+ik_match_table:
+  pelvis:
+    - C_pelvis0001_bind_JNT
+    - 50
+    - 10
+    - [0.0, 0.0, 0.0]
+    - [-0.5, 0.5, 0.5, 0.5]
+  left_hip_roll_link:
+    - L_legUpper0001_bind_JNT
+    - 10
+    - 0
+    - [0.0, 0.0, 0.0]
+    - [-0.5, 0.5, 0.5, 0.5]
+  left_hip_yaw_link:
+    - L_legUpper0001_bind_JNT
+    - 0
+    - 10
+    - [0.0, 0.0, 0.0]
+    - [-0.5, 0.5, 0.5, 0.5]
+  left_knee_link:
+    - L_legLower0001_bind_JNT
+    - 10
+    - 5
+    - [0.0, 0.0, 0.0]
+    - [-0.5, 0.5, 0.5, 0.5]
+  left_ankle_roll_link:
+    - LeftFootMod
+    - 50
+    - 10
+    - [0.0, 0.0, 0.0]
+    - [-0.5, 0.5, 0.5, 0.5]
+  right_hip_roll_link:
+    - R_legUpper0001_bind_JNT
+    - 10
+    - 0
+    - [0.0, 0.0, 0.0]
+    - [-0.5, 0.5, 0.5, 0.5]
+  right_hip_yaw_link:
+    - R_legUpper0001_bind_JNT
+    - 0
+    - 10
+    - [0.0, 0.0, 0.0]
+    - [-0.5, 0.5, 0.5, 0.5]
+  right_knee_link:
+    - R_legLower0001_bind_JNT
+    - 10
+    - 5
+    - [0.0, 0.0, 0.0]
+    - [-0.5, 0.5, 0.5, 0.5]
+  right_ankle_roll_link:
+    - RightFootMod
+    - 50
+    - 10
+    - [0.0, 0.0, 0.0]
+    - [-0.5, 0.5, 0.5, 0.5]
+  torso_link:
+    - C_spine0003_bind_JNT
+    - 0
+    - 50
+    - [0.0, 0.0, 0.0]
+    - [-0.5, 0.5, 0.5, 0.5]
+  left_shoulder_roll_link:
+    - L_armUpper0001_bind_JNT
+    - 10
+    - 0
+    - [0.0, 0.0, 0.0]
+    - [-0.70710678, 0, 0.70710678, 0]
+  left_shoulder_yaw_link:
+    - L_armUpper0001_bind_JNT
+    - 0
+    - 10
+    - [0.0, 0.0, 0.0]
+    - [-0.70710678, 0, 0.70710678, 0]
+  left_elbow_link:
+    - L_armLower0001_bind_JNT
+    - 10
+    - 5
+    - [0.0, 0.0, 0.0]
+    - [1,0,0,0]
+  left_wrist_yaw_link:
+    - L_hand0001_bind_JNT
+    - 10
+    - 10
+    - [0.0, 0.0, 0.0]
+    - [1,0,0,0]
+  right_shoulder_roll_link:
+    - R_armUpper0001_bind_JNT
+    - 10
+    - 0
+    - [0.0, 0.0, 0.0]
+    - [0, 0.70710678, 0, 0.70710678]
+  right_shoulder_yaw_link:
+    - R_armUpper0001_bind_JNT
+    - 0
+    - 10
+    - [0.0, 0.0, 0.0]
+    - [0, 0.70710678, 0, 0.70710678]
+  right_elbow_link:
+    - R_armLower0001_bind_JNT
+    - 10
+    - 5
+    - [0.0, 0.0, 0.0]
+    - [0.0, 0.0, 0.0, 1.0]
+  right_wrist_yaw_link:
+    - R_hand0001_bind_JNT
+    - 10
+    - 10
+    - [0.0, 0.0, 0.0]
+    - [0.0, 0.0, 0.0, 1.0]

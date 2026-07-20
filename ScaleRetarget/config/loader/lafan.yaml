@@ -1,0 +1,11 @@
+# @package _global_
+
+defaults:
+  - base
+
+loader:
+  _target_: scaleretarget.loader.lafan_loader.LafanLoader
+  _recursive_: False
+  config:
+    loader_type: lafan
+    data_format: .bvh

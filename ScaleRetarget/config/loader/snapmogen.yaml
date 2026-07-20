@@ -1,0 +1,15 @@
+# @package _global_
+
+defaults:
+  - base
+
+loader:
+  _target_: scaleretarget.loader.snapmogen_loader.SnapMogenLoader
+  _recursive_: False
+  config:
+    loader_type: snapmogen
+    data_format: .bvh
+
+    use_optimized_shape: True
+    optim_joint_matches: config/correspondence/optim_shape/${loader.config.loader_type}_to_${robot.robot_type}.yaml
+    optim_iterations: 3000

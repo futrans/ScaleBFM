@@ -1,0 +1,15 @@
+# @package _global_
+
+defaults:
+  - base
+
+formatter:
+  _target_: scaleretarget.formatter.kinematic_formatter.KinematicFormatter
+  _recursive_: False
+  config:
+    formatter_type: kinematic
+
+    kinematic_model_device: cpu
+
+    height_adjust: True
+    root_offset: False

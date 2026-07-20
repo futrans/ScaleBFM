@@ -1,0 +1,130 @@
+robot_root_name: pelvis
+human_root_name: mixamorig:Hips
+ground_height: 0.0
+human_height_assumption: 1.8
+
+human_scale_table: 
+  "mixamorig:Hips": 1.0
+  "mixamorig:LeftUpLeg": 1.0
+  "mixamorig:LeftLeg": 1.0
+  LeftFootMod: 1.0
+  "mixamorig:RightUpLeg": 1.0
+  "mixamorig:RightLeg": 1.0
+  RightFootMod: 1.0
+  "mixamorig:Spine2": 1.0
+  "mixamorig:LeftArm": 1.0
+  "mixamorig:LeftForeArm": 1.0
+  "mixamorig:LeftHand": 1.0
+  "mixamorig:RightArm": 1.0
+  "mixamorig:RightForeArm": 1.0
+  "mixamorig:RightHand": 1.0
+
+ik_match_table:
+  pelvis:
+    - mixamorig:Hips
+    - 50
+    - 10
+    - [0.0, 0.0, 0.0]
+    - [-0.70710678,  0.        ,  0.        ,  0.70710678]
+  left_hip_roll_link:
+    - mixamorig:LeftUpLeg
+    - 5
+    - 0
+    - [0.0, 0.0, 0.0]
+    - [-0.70710678,  0.        ,  0.        ,  0.70710678]
+  left_hip_yaw_link:
+    - mixamorig:LeftUpLeg
+    - 0
+    - 10
+    - [0.0, 0.0, 0.0]
+    - [-0.70710678,  0.        ,  0.        ,  0.70710678]
+  left_knee_link:
+    - mixamorig:LeftLeg
+    - 10
+    - 5
+    - [0.0, 0.0, 0.0]
+    - [-0.70710678,  0.        ,  0.        ,  0.70710678]
+  left_ankle_roll_link:
+    - LeftFootMod
+    - 50
+    - 10
+    - [0.0, 0.0, 0.0]
+    - [-0.70710678,  0.        ,  0.        ,  0.70710678]
+  right_hip_roll_link:
+    - mixamorig:RightUpLeg
+    - 5
+    - 0
+    - [0.0, 0.0, 0.0]
+    - [-0.70710678,  0.        ,  0.        ,  0.70710678]
+  right_hip_yaw_link:
+    - mixamorig:RightUpLeg
+    - 0
+    - 10
+    - [0.0, 0.0, 0.0]
+    - [-0.70710678,  0.        ,  0.        ,  0.70710678]
+  right_knee_link:
+    - mixamorig:RightLeg
+    - 10
+    - 5
+    - [0.0, 0.0, 0.0]
+    - [-0.70710678,  0.        ,  0.        ,  0.70710678]
+  right_ankle_roll_link:
+    - RightFootMod
+    - 50
+    - 10
+    - [0.0, 0.0, 0.0]
+    - [-0.70710678,  0.        ,  0.        ,  0.70710678]
+  torso_link:
+    - mixamorig:Spine2
+    - 0
+    - 50
+    - [0.0, 0.0, 0.0]
+    - [-0.70710678,  0.        ,  0.        ,  0.70710678]
+  left_shoulder_roll_link:
+    - mixamorig:LeftArm
+    - 10
+    - 0
+    - [0.0, 0.0, 0.0]
+    - [ 0.5,  0.5, -0.5, -0.5]
+  left_shoulder_yaw_link:
+    - mixamorig:LeftArm
+    - 0
+    - 10
+    - [0.0, 0.0, 0.0]
+    - [ 0.5,  0.5, -0.5, -0.5]
+  left_elbow_link:
+    - mixamorig:LeftForeArm
+    - 10
+    - 5
+    - [0.0, 0.0, 0.0]
+    - [0.70710678, 0.70710678, 0.        , 0.        ]
+  left_wrist_yaw_link:
+    - mixamorig:LeftHand
+    - 10
+    - 10
+    - [0.0, 0.0, 0.0]
+    - [0.70710678, 0.70710678, 0.        , 0.        ]
+  right_shoulder_roll_link:
+    - mixamorig:RightArm
+    - 10
+    - 0
+    - [0.0, 0.0, 0.0]
+    - [-0.5,  0.5, -0.5,  0.5]
+  right_shoulder_yaw_link:
+    - mixamorig:RightArm
+    - 0
+    - 10
+    - [0.0, 0.0, 0.0]
+    - [-0.5,  0.5, -0.5,  0.5]
+  right_elbow_link:
+    - mixamorig:RightForeArm
+    - 10
+    - 5
+    - [0.0, 0.0, 0.0]
+    - [ 0.        ,  0.        ,  0.70710678, -0.70710678]
+  right_wrist_yaw_link:
+    - mixamorig:RightHand
+    - 10
+    - 10
+    - [0.0, 0.0, 0.0]
+    - [ 0.        ,  0.        ,  0.70710678, -0.70710678]

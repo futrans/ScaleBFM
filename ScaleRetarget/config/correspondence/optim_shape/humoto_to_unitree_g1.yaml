@@ -1,0 +1,26 @@
+
+bvh_root: mixamorig:Hips
+
+robot_pose_modifier:
+  left_shoulder_roll_joint: 1.57
+  left_elbow_joint: 1.57
+  # left_ankle_pitch_joint: 0.3
+  right_shoulder_roll_joint: -1.57
+  right_elbow_joint: 1.57
+  # right_ankle_pitch_joint: 0.3
+
+joint_matches:
+  - ["pelvis", "mixamorig:Hips"]
+  - ["left_hip_roll_link", "mixamorig:LeftUpLeg"]
+  - ["left_knee_link", "mixamorig:LeftLeg"]
+  - ["left_ankle_roll_link", "mixamorig:LeftFoot"]
+  - ["right_hip_roll_link", "mixamorig:RightUpLeg"]
+  - ["right_knee_link", "mixamorig:RightLeg"]
+  - ["right_ankle_roll_link", "mixamorig:RightFoot"]
+  - ["upper_spine_link", "mixamorig:Spine2"]
+  - ["left_shoulder_roll_link", "mixamorig:LeftArm"]
+  - ["left_elbow_link", "mixamorig:LeftForeArm"]
+  - ["left_wrist_yaw_link", "mixamorig:LeftHand"]
+  - ["right_shoulder_roll_link", "mixamorig:RightArm"]
+  - ["right_elbow_link", "mixamorig:RightForeArm"]
+  - ["right_wrist_yaw_link", "mixamorig:RightHand"] # weishuai: using hand instead of wrist is better for shape optimization;

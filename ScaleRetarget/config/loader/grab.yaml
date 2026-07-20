@@ -1,0 +1,19 @@
+# @package _global_
+
+defaults:
+  - base
+
+loader:
+  _target_: scaleretarget.loader.grab_loader.GrabLoader
+  _recursive_: False
+  config:
+    loader_type: grab
+    data_format: .pkl
+
+    body_model_path: assets/body_models
+    
+    exclude_content: []
+
+    use_optimized_shape: True # When using optimized shape, the scale table would be disabled
+    optim_iterations: 6000
+    optim_joint_matches: config/correspondence/optim_shape/${loader.config.loader_type}_to_${robot.robot_type}.yaml

@@ -1,0 +1,9 @@
+# @package _global_
+
+formatter:
+  _target_: scaleretarget.formatter.base_formatter.BaseFormatter
+  _recursive_: False
+  config:
+    formatter_type: base
+
+    robot: ${robot}

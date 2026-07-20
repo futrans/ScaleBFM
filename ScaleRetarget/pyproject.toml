@@ -1,0 +1,50 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "scaleretarget"
+version = "0.1.0"
+description = "Scaling Behavior Foundation Model for Humanoid Robots"
+readme = "README.md"
+requires-python = ">=3.11,<3.12"
+license = "MIT"
+authors = [
+  { name = "Weishuai Zeng", email = "weishuai107@gmail.com" },
+]
+dependencies = [
+  "loop_rate_limiters",
+  "mink",
+  "mujoco",
+  "matplotlib",
+  "numpy",
+  "scipy",
+  "qpsolvers[proxqp]",
+  "rich",
+  "tqdm",
+  "opencv-python",
+  "natsort",
+  "psutil",
+  "smplx @ git+https://github.com/vchoutas/smplx",
+  "protobuf",
+  "redis[hiredis]",
+  "imageio[ffmpeg]",
+  "hydra-core",
+  "omegaconf",
+  "loguru",
+  "termcolor",
+  "requests",
+  "ipdb",
+  "typer",
+  "joblib",
+  "easydict",
+  # Official Blender wheels for this environment target CPython 3.11.
+  "bpy>=4.5,<5.1",
+]
+
+[project.urls]
+Repository = "https://github.com/zengweishuai/ScaleBFM.git"
+
+[tool.setuptools.packages.find]
+include = ["scaleretarget*"]
+namespaces = false

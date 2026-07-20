@@ -1,0 +1,23 @@
+# cache
+__pycache__/
+*.py[cod]
+
+# macos
+*.DS_Store
+
+# egg-info
+*.egg-info/
+
+# dataset
+dataset/
+retargeted_dataset/
+
+# hydra logs
+outputs/
+
+# videos
+videos/
+
+body_models/
+
+example/

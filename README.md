@@ -12,3 +12,21 @@ The official implementation of the paper *Scaling Behavior Foundation Model for 
 > Please check this repository regularly for the latest releases and updates. If you encounter any problems or have any questions, feel free to open an issue.
 >
 > — Weishuai Zeng
+
+## ScaleRetarget
+
+**ScaleRetarget** is the motion-retargeting toolkit used to prepare human motion
+data for ScaleBFM. It converts motion from common mocap representations into
+robot joint trajectories and currently provides a complete configuration for the
+Unitree G1 humanoid.
+
+
+The retargeting code and documentation are available in
+**[ScaleRetarget](ScaleRetarget/README.md)**. See the guide for supported datasets,
+environment setup, motion retargeting, dataset preparation, and visualization.
+
+<p align="center">
+  <img src="ScaleRetarget/assets/demos/amass.gif" alt="AMASS motion retargeted to Unitree G1" width="32%">
+  <img src="ScaleRetarget/assets/demos/finedance.gif" alt="FineDance motion retargeted to Unitree G1" width="32%">
+  <img src="ScaleRetarget/assets/demos/mixamo.gif" alt="Mixamo motion retargeted to Unitree G1" width="32%">
+</p>

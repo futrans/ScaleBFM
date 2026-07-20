@@ -1,0 +1,13 @@
+# @package _global_
+
+loader:
+  _target_: scaleretarget.loader.base_loader.BaseLoader
+  _recursive_: False
+  config:
+    loader_type: base
+    data_format: null
+    overwrite: False
+    target_fps: 30
+    output_dir: ${output_dir}
+    
+    robot: ${robot}

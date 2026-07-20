@@ -1,0 +1,130 @@
+robot_root_name: pelvis
+human_root_name: Hips
+ground_height: 0.0
+human_height_assumption: 1.8
+
+human_scale_table: 
+  Hips: 1.0
+  LeftHip: 1.0
+  LeftKnee: 1.0
+  LeftFootMod: 1.0
+  RightHip: 1.0
+  RightKnee: 1.0
+  RightFootMod: 1.0
+  Chest4: 1.0
+  LeftShoulder: 1.0
+  LeftElbow: 1.0
+  LeftWrist: 1.0
+  RightShoulder: 1.0
+  RightElbow: 1.0
+  RightWrist: 1.0
+
+ik_match_table:
+  pelvis:
+    - Hips
+    - 50
+    - 10
+    - [0.0, 0.0, 0.0]
+    - [-0.5, 0.5, 0.5, 0.5]
+  left_hip_roll_link:
+    - LeftHip
+    - 5
+    - 0
+    - [0.0, 0.0, 0.0]
+    - [-0.5, 0.5, 0.5, 0.5]
+  left_hip_yaw_link:
+    - LeftHip
+    - 0
+    - 10
+    - [0.0, 0.0, 0.0]
+    - [-0.5, 0.5, 0.5, 0.5]
+  left_knee_link:
+    - LeftKnee
+    - 10
+    - 5
+    - [0.0, 0.0, 0.0]
+    - [-0.5, 0.5, 0.5, 0.5]
+  left_ankle_roll_link:
+    - LeftFootMod
+    - 50
+    - 10
+    - [0.0, 0.0, 0.0]
+    - [-0.5, 0.5, 0.5, 0.5]
+  right_hip_roll_link:
+    - RightHip
+    - 5
+    - 0
+    - [0.0, 0.0, 0.0]
+    - [-0.5, 0.5, 0.5, 0.5]
+  right_hip_yaw_link:
+    - RightHip
+    - 0
+    - 10
+    - [0.0, 0.0, 0.0]
+    - [-0.5, 0.5, 0.5, 0.5]
+  right_knee_link:
+    - RightKnee
+    - 10
+    - 5
+    - [0.0, 0.0, 0.0]
+    - [-0.5, 0.5, 0.5, 0.5]
+  right_ankle_roll_link:
+    - RightFootMod
+    - 50
+    - 10
+    - [0.0, 0.0, 0.0]
+    - [-0.5, 0.5, 0.5, 0.5]
+  torso_link:
+    - Chest4
+    - 0
+    - 50
+    - [0.0, 0.0, 0.0]
+    - [-0.5, 0.5, 0.5, 0.5]
+  left_shoulder_roll_link:
+    - LeftShoulder
+    - 10
+    - 0
+    - [0.0, 0.0, 0.0]
+    - [-0.70710678, 0, 0.70710678, 0]
+  left_shoulder_yaw_link:
+    - LeftShoulder
+    - 0
+    - 10
+    - [0.0, 0.0, 0.0]
+    - [-0.70710678, 0, 0.70710678, 0]
+  left_elbow_link:
+    - LeftElbow
+    - 10
+    - 5
+    - [0.0, 0.0, 0.0]
+    - [1.0 ,0.0,0.0,0.0]
+  left_wrist_yaw_link:
+    - LeftWrist
+    - 10
+    - 10
+    - [0.0, 0.0, 0.0]
+    - [1.0,0.0,0.0,0.0]
+  right_shoulder_roll_link:
+    - RightShoulder
+    - 10
+    - 0
+    - [0.0, 0.0, 0.0]
+    - [0, 0.70710678, 0, 0.70710678]
+  right_shoulder_yaw_link:
+    - RightShoulder
+    - 0
+    - 10
+    - [0.0, 0.0, 0.0]
+    - [0, 0.70710678, 0, 0.70710678]
+  right_elbow_link:
+    - RightElbow
+    - 10
+    - 5
+    - [0.0, 0.0, 0.0]
+    - [0.0, 0.0, 0.0, 1.0]
+  right_wrist_yaw_link:
+    - RightWrist
+    - 10
+    - 10
+    - [0.0, 0.0, 0.0]
+    - [0.0, 0.0, 0.0, 1.0]

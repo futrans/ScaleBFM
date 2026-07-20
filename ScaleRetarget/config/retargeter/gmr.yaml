@@ -1,0 +1,17 @@
+# @package _global_
+
+defaults:
+  - base
+
+retargeter:
+  _target_: scaleretarget.retargeter.gmr_retargeter.GmrRetargeter
+  _recursive_: False
+  config:
+    retargeter_type: gmr
+
+    # retargeting method
+    solver: daqp
+    damping: 0.5
+    use_velocity_limit: False
+
+    ik_config: config/correspondence/gmr/${loader.config.loader_type}_to_${robot.robot_type}.yaml

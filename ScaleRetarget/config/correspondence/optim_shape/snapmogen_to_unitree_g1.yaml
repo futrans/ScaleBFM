@@ -1,0 +1,30 @@
+
+bvh_root: C_pelvis0001_bind_JNT
+
+robot_pose_modifier:
+  left_shoulder_roll_joint: 1.57
+  left_elbow_joint: 1.57
+  # left_ankle_pitch_joint: 0.3
+  right_shoulder_roll_joint: -1.57
+  right_elbow_joint: 1.57
+  # right_ankle_pitch_joint: 0.3
+
+joint_matches:
+  - ["pelvis", "C_pelvis0001_bind_JNT"]
+  - ["left_hip_roll_link", "L_legUpper0001_bind_JNT"]
+  - ["left_knee_link", "L_legLower0001_bind_JNT"]
+  - ["left_ankle_roll_link", "L_foot0001_bind_JNT"]
+  # - ["left_toe_link", "L_foot0002_bind_JNT"]
+  - ["right_hip_roll_link", "R_legUpper0001_bind_JNT"]
+  - ["right_knee_link", "R_legLower0001_bind_JNT"]
+  - ["right_ankle_roll_link", "R_foot0001_bind_JNT"]
+  # - ["right_toe_link", "R_foot0002_bind_JNT"]
+  - ["spine_link", "C_spine0003_bind_JNT"]
+  # - ["left_shoulder_pitch_link", "L_clavicle_bind_JNT"]
+  - ["left_shoulder_roll_link", "L_armUpper0001_bind_JNT"]
+  - ["left_elbow_link", "L_armLower0001_bind_JNT"]
+  - ["left_wrist_yaw_link", "L_hand0001_bind_JNT"]
+  # - ["right_shoulder_pitch_link", "R_clavicle_bind_JNT"]
+  - ["right_shoulder_roll_link", "R_armUpper0001_bind_JNT"]
+  - ["right_elbow_link", "R_armLower0001_bind_JNT"]
+  - ["right_wrist_yaw_link", "R_hand0001_bind_JNT"] # weishuai: using hand instead of wrist is better for shape optimization;

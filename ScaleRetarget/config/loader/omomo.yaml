@@ -1,0 +1,20 @@
+# @package _global_
+
+defaults:
+  - base
+
+loader:
+  _target_: scaleretarget.loader.omomo_loader.OmomoLoader
+  _recursive_: False
+  config:
+    loader_type: omomo
+    data_format: .pkl
+    omomo_orig_dir: dataset/omomo_orig
+
+    body_model_path: assets/body_models
+    
+    exclude_content: []
+
+    use_optimized_shape: True # When using optimized shape, the scale table would be disabled
+    optim_iterations: 6000
+    optim_joint_matches: config/correspondence/optim_shape/${loader.config.loader_type}_to_${robot.robot_type}.yaml

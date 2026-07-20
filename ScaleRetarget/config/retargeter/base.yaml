@@ -1,0 +1,15 @@
+# @package _global_
+
+retargeter:
+  _target_: scaleretarget.retargeter.base_retargeter.BaseRetargeter
+  _recursive_: False
+  config:
+    retargeter_type: base
+    
+    robot: ${robot}
+
+    viewer:
+      enable_viewer: ${enable_viewer}
+      record_video: ${record_video}
+      camera_follow: True
+      rate_limit: True

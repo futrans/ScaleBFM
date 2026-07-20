@@ -1,0 +1,15 @@
+defaults:
+  - _self_
+  - robot/unitree_g1
+  - loader/lafan
+  - formatter/base
+  - retargeter/gmr
+
+data_path: ???
+output_dir: retargeted_dataset
+
+multi_process: False
+num_workers: null # null uses min(CPU count, number of motions); lower this to limit model memory.
+
+enable_viewer: False
+record_video: False

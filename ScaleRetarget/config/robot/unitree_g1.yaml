@@ -1,0 +1,13 @@
+# @package _global_
+
+robot:
+  robot_type: unitree_g1
+
+  robot_xml_path: assets/unitree_g1/g1_mocap_29dof.xml
+
+  robot_base: pelvis
+
+  robot_root_height: 0.79
+  robot_total_height: 1.32
+
+  viewer_cam_dist: 2.0

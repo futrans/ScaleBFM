@@ -1,0 +1,27 @@
+
+bvh_root: Hips
+
+robot_pose_modifier:
+  left_shoulder_roll_joint: 1.57
+  left_elbow_joint: 1.57
+  # left_ankle_pitch_joint: 0.3
+  right_shoulder_roll_joint: -1.57
+  right_elbow_joint: 1.57
+  # right_ankle_pitch_joint: 0.3
+
+joint_matches:
+  - ["pelvis", "Hips"]
+  # - ["head_link", "Head"]
+  - ["left_hip_roll_link", "LeftHip"]
+  - ["left_knee_link", "LeftKnee"]
+  - ["left_ankle_roll_link", "LeftAnkle"]
+  - ["right_hip_roll_link", "RightHip"]
+  - ["right_knee_link", "RightKnee"]
+  - ["right_ankle_roll_link", "RightAnkle"]
+  - ["upper_spine_link", "Chest4"]
+  - ["left_shoulder_roll_link", "LeftShoulder"]
+  - ["left_elbow_link", "LeftElbow"]
+  - ["left_wrist_yaw_link", "LeftWrist"]
+  - ["right_shoulder_roll_link", "RightShoulder"]
+  - ["right_elbow_link", "RightElbow"]
+  - ["right_wrist_yaw_link", "RightWrist"] # weishuai: using hand instead of wrist is better for shape optimization;
