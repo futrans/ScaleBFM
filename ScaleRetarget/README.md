@@ -5,7 +5,7 @@ robot trajectories through dataset-specific loaders, motion retargeting, and
 configurable output formatters.
 
 This guide covers environment setup, dataset preparation, retargeting, and result
-visualization. **Run all commands from the repository root.**
+visualization. **Run all commands from the ScaleRetarget root.**
 
 > [!IMPORTANT]
 > **Feedback and current limitations:** ScaleRetarget supports a large and growing
