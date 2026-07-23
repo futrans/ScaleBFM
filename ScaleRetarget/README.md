@@ -110,7 +110,7 @@ ScaleRetarget requires Python 3.11.
 
 ```bash
 git clone https://github.com/zengweishuai/ScaleBFM.git
-cd ScaleBFM
+cd ScaleBFM/ScaleRetarget
 
 # Activate your environment with Python 3.11
 pip install -e .
@@ -535,10 +535,10 @@ in ScaleRetarget's `.pkl` format; do not run `retarget.py` on them again.
 
 1. **Obtain the source data.** Xsens is a motion-capture system rather than a
    standalone dataset. You can record your own motions and export them as BVH, or
-   download the source BVH files used for the [ScaleBFM Ours test set](https://drive.google.com/file/d/1nlvjvsj63J-yLzubQcZivaFbxMlyh00c/view?usp=drive_link).
+   download the source BVH files used for the ScaleBFM Ours test set from [Huggingface](https://huggingface.co/WeishuaiZeng/ScaleBFM/tree/main/test_set/Ours_Test_Set).
 
 > [!TIP]
-> **Ready-to-use motions:** We also provide the retargeted `.pkl` files. If you only
+> **Ready-to-use motions:** We also provide the retargeted files in `Ours_Test_Set_retargeted_pkl.zip` on Huggingface. If you only
 > need the Unitree G1 trajectories, you can use these files directly and skip the
 > BVH preparation and retargeting steps below.
 
