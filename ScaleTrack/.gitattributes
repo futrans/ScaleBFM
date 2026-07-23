@@ -1,0 +1,26 @@
+# copied and modified from https://github.com/NVIDIA/warp/blob/main/.gitattributes
+* text=auto
+*.sh text eol=LF
+
+# copied from https://github.com/isaac-sim/IsaacLab/blob/main/.gitattributes
+*.usd filter=lfs diff=lfs merge=lfs -text
+*.dae filter=lfs diff=lfs merge=lfs -text
+*.mtl filter=lfs diff=lfs merge=lfs -text
+*.obj filter=lfs diff=lfs merge=lfs -text
+*.gif filter=lfs diff=lfs merge=lfs -text
+*.png filter=lfs diff=lfs merge=lfs -text
+*.jpg filter=lfs diff=lfs merge=lfs -text
+*.psd filter=lfs diff=lfs merge=lfs -text
+*.mp4 filter=lfs diff=lfs merge=lfs -text
+*.usda filter=lfs diff=lfs merge=lfs -text
+*.hdr filter=lfs diff=lfs merge=lfs -text
+*.pt filter=lfs diff=lfs merge=lfs -text
+*.jit filter=lfs diff=lfs merge=lfs -text
+
+# Store the current G1 assets in regular Git; 
+source/scaletrack/scaletrack/assets/robots/g1_29dof/g1_29dof.usda -filter -diff -merge -text
+source/scaletrack/scaletrack/assets/robots/g1_29dof/configuration/g1_base.usd -filter -diff -merge -text
+source/scaletrack/scaletrack/assets/robots/g1_29dof/configuration/g1_physics.usd -filter -diff -merge -text
+source/scaletrack/scaletrack/assets/robots/g1_29dof/configuration/g1_robot.usd -filter -diff -merge -text
+source/scaletrack/scaletrack/assets/robots/g1_29dof/configuration/g1_sensor.usd -filter -diff -merge -text
+source/scaletrack/scaletrack/assets/robots/g1_29dof/meshes/half_sphere.obj -filter -diff -merge -text

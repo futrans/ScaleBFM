@@ -30,3 +30,22 @@ environment setup, motion retargeting, dataset preparation, and visualization.
   <img src="ScaleRetarget/assets/demos/finedance.gif" alt="FineDance motion retargeted to Unitree G1" width="32%">
   <img src="ScaleRetarget/assets/demos/mixamo.gif" alt="Mixamo motion retargeted to Unitree G1" width="32%">
 </p>
+
+## ScaleTrack
+
+**ScaleTrack** provides the foundational implementation of the BFM pretraining
+pipeline. It packages retargeted robot trajectories into motion datasets and
+pretrains BFMs through motion tracking in IsaacLab using the bundled RSL-RL
+implementation. It currently provides a complete pretraining pipeline for the
+Unitree G1 humanoid, including single- and multi-GPU training, policy playback, and export.
+
+The training code and documentation are available in
+**[ScaleTrack](ScaleTrack/README.md)**. See the guide for environment and robot
+asset setup, motion preparation and packaging, policy training, playback, and
+export.
+
+<p align="center">
+  <img src="ScaleTrack/assets/demos/example_1.gif" alt="ScaleTrack motion-tracking demo 1" width="32%">
+  <img src="ScaleTrack/assets/demos/example_2.gif" alt="ScaleTrack motion-tracking demo 2" width="32%">
+  <img src="ScaleTrack/assets/demos/example_3.gif" alt="ScaleTrack motion-tracking demo 3" width="32%">
+</p>
