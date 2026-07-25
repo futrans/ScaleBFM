@@ -26,7 +26,6 @@ sys.argv = [sys.argv[0]] + hydra_args
 """Rest everything follows."""
 import time
 import math
-import gymnasium as gym
 import os
 import re
 import json
