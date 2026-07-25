@@ -1,0 +1,45 @@
+
+root_quat_buffer:
+  func:
+    _target_: observation.components.root_quat_buffer
+    _partial_: true
+base_ang_vel_buffer:
+  func:
+    _target_: observation.components.base_ang_vel_buffer
+    _partial_: true
+dof_pos_buffer:
+  func:
+    _target_: observation.components.dof_pos_buffer
+    _partial_: true
+dof_vel_buffer:
+  func:
+    _target_: observation.components.dof_vel_buffer
+    _partial_: true
+actions_buffer:
+  func:
+    _target_: observation.components.actions_buffer
+    _partial_: true
+body_pos_w_future:
+  func:
+    _target_: observation.components.body_pos_w_future
+    _partial_: true
+# body_quat_w_future:
+#   func:
+#     _target_: observation.components.body_quat_w_future
+#     _partial_: true
+target_body_pos_future_to_robot_base:
+  func:
+    _target_: observation.components.target_body_pos_future_to_robot_base
+    _partial_: true
+target_body_rot_future_to_robot_base:
+  func:
+    _target_: observation.components.target_body_rot_future_to_robot_base
+    _partial_: true
+body_quat_w_future:
+  func:
+    _target_: observation.components.body_quat_w_future
+    _partial_: true
+future_time_offsets:
+  func:
+    _target_: observation.components.future_time_offsets
+    _partial_: true

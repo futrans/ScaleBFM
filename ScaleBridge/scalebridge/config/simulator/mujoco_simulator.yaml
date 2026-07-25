@@ -1,0 +1,10 @@
+defaults:
+  - base_simulator
+
+_target_: simulator.mujoco_simulator.MujocoSimulator
+_recursive_: False
+config:
+  record_video: False
+  marker: True
+  joystick: False
+  camera_follow: True

@@ -1,17 +1,21 @@
 # ScaleBFM
 
-The official implementation of the paper *Scaling Behavior Foundation Model for Humanoid Robots*.
+The official implementation of *Scaling Behavior Foundation Model for Humanoid Robots*.
 
-> [!IMPORTANT]
-> **Release Notice**
->
-> We apologize for the delay. Preparing the full release has taken longer than anticipated. Over the coming week, we will gradually release the code and resources for retargeting, training, deployment, and other related components. We expect most of the code to be available by July 26, 2026.
->
-> I am personally reviewing, cleaning, and organizing the entire codebase and am working to make everything available as soon as possible. Thank you for your patience and understanding.
->
-> Please check this repository regularly for the latest releases and updates. If you encounter any problems or have any questions, feel free to open an issue.
->
-> — Weishuai Zeng
+> ScaleBFM investigates how Behavior Foundation Models can be effectively scaled
+> through the coordinated design of the learning paradigm, behavioral data, and
+> model architecture. The resulting framework enables humanoid robots to perform
+> diverse behaviors with natural whole-body coordination, including agile
+> locomotion, dexterous manipulation, and coordinated loco-manipulation in both
+> simulation and the real world.
+
+<p align="center">
+  <a href="https://scalebfm.github.io/"><img src="https://img.shields.io/badge/Project-Website-4285F4?logo=googlechrome&logoColor=white" alt="Project website"></a>
+  <a href="https://arxiv.org/abs/2607.15163"><img src="https://img.shields.io/badge/arXiv-2607.15163-b31b1b?logo=arxiv&logoColor=white" alt="arXiv paper"></a>
+  <a href="https://github.com/zengweishuai/ScaleBFM/issues"><img src="https://img.shields.io/badge/GitHub-Issues-181717?logo=github&logoColor=white" alt="GitHub issues"></a>
+</p>
+
+
 
 ## ScaleRetarget
 
@@ -49,3 +53,48 @@ export.
   <img src="ScaleTrack/assets/demos/example_2.gif" alt="ScaleTrack motion-tracking demo 2" width="32%">
   <img src="ScaleTrack/assets/demos/example_3.gif" alt="ScaleTrack motion-tracking demo 3" width="32%">
 </p>
+
+## ScaleBridge
+
+**ScaleBridge** provides a unified Sim2Sim and Sim2Real deployment framework for
+Behavior Foundation Models on humanoid robots. It enables a seamless transition
+from policy evaluation in MuJoCo to deployment on physical robots.
+
+The deployment code and documentation are available in
+**[ScaleBridge](ScaleBridge/README.md)**. See the guide for environment setup,
+robot controller configuration, policy evaluation, real-world deployment, and
+migration instructions.
+
+<p align="center">
+  <img src="ScaleBridge/assets/teaser_1.gif" alt="ScaleBridge humanoid deployment demo 1" width="32%">
+  <img src="ScaleBridge/assets/teaser_2.gif" alt="ScaleBridge humanoid deployment demo 2" width="32%">
+  <img src="ScaleBridge/assets/teaser_3.gif" alt="ScaleBridge humanoid deployment demo 3" width="32%">
+</p>
+
+## Citation
+
+If you find this work useful, please cite our paper and previous work
+that introduced the BFM framework:
+
+```bibtex
+@article{zeng2026scaling,
+  title   = {Scaling Behavior Foundation Model for Humanoid Robots},
+  author  = {Zeng, Weishuai and Yin, Kangning and Niu, Xiaojie and
+             Lu, Shunlin and Zhong, Weixiang and Chen, Jiahe and
+             Jia, Feiyu and Chen, Xiao and Wang, Zirui and Xu, Furui and
+             Zhou, Ming and Li, Kailin and Zhang, Weinan and Wang, He and
+             Yi, Li and Lin, Dahua and Pang, Jiangmiao and Wang, Jingbo},
+  journal = {arXiv preprint arXiv:2607.15163},
+  year    = {2026}
+}
+```
+
+```bibtex
+@article{zeng2025behavior,
+  title   = {Behavior Foundation Model for Humanoid Robots},
+  author  = {Zeng, Weishuai and Lu, Shunlin and Yin, Kangning and
+             Niu, Xiaojie and Dai, Minyue and Wang, Jingbo and Pang, Jiangmiao},
+  journal = {arXiv preprint arXiv:2509.13780},
+  year    = {2025}
+}
+```

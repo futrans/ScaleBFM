@@ -1,0 +1,33 @@
+from setuptools import setup, find_packages
+
+setup(
+  name = 'scalebridge',
+  packages = find_packages(),
+  author="Weishuai Zeng",
+  author_email="weishuai107@gmail.com",
+  description="Implementation of Sim2Sim and Sim2Real for Humanoid Robots",
+  long_description=open("README.md").read(),
+  long_description_content_type="text/markdown",
+  url="https://github.com/zengweishuai/ScaleBFM.git",
+  license="MIT",
+  version="0.1.0",
+  install_requires=[
+    "torch",
+    "numpy",
+    "mujoco",
+    "omegaconf",
+    "hydra-core",
+    "easydict",
+    "scipy",
+    "joblib",
+    "loguru",
+    "rich",
+    "lcm",
+    "empy",
+    "catkin_pkg",
+    "ipdb",
+    "pygame",
+    "imageio[ffmpeg]",
+    "torch_tensorrt==2.8.0",
+  ],
+)

@@ -1,0 +1,13 @@
+*.pyc
+outputs/
+*.egg-info
+*.DS_Store
+*.json
+*.onnx
+*.npz
+!squat.npz
+*.pt
+*.obj
+g1_29dof_*.xml
+!g1_29dof.xml
+!g1_29dof_dex3.xml
