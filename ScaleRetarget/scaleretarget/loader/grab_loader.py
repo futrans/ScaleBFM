@@ -10,7 +10,7 @@ from loguru import logger
 from scaleretarget.loader.base_loader import BaseLoader, Mode
 from scaleretarget.utils.resampling import resample_smplx_motion
 from scaleretarget.utils.shape_optimizer import optimize_smplx_shape
-from scaleretarget.utils.smplx import SmplxModelCache, run_smplx_inference
+from scaleretarget.utils.smplx import SmplxModelCache, expand_betas, run_smplx_inference
 
 class GrabLoader(BaseLoader):
 
@@ -62,7 +62,7 @@ class GrabLoader(BaseLoader):
             body_model = self.body_models.get(smplx_data['gender'])
         smplx_output = run_smplx_inference(
             body_model,
-            betas=betas, # (16,)
+            betas=expand_betas(betas, num_frames),
             global_orient=torch.tensor(smplx_data["root_orient"]).float(), # (N, 3)
             body_pose=torch.tensor(smplx_data["pose_body"]).float(), # (N, 63)
             transl=torch.tensor(smplx_data["trans"]).float(), # (N, 3)
@@ -71,7 +71,7 @@ class GrabLoader(BaseLoader):
             jaw_pose=torch.zeros(num_frames, 3).float(),
             leye_pose=torch.zeros(num_frames, 3).float(),
             reye_pose=torch.zeros(num_frames, 3).float(),
-            # expression=torch.zeros(num_frames, 10).float(),
+            expression=torch.zeros(num_frames, 10).float(),
             return_full_pose=True,
         )
 

@@ -1,4 +1,5 @@
 import os
+import joblib
 import numpy as np
 import torch
 from natsort import natsorted
@@ -9,7 +10,14 @@ from loguru import logger
 from scaleretarget.loader.base_loader import BaseLoader, Mode
 from scaleretarget.utils.resampling import resample_smplx_motion
 from scaleretarget.utils.shape_optimizer import optimize_smplx_shape
-from scaleretarget.utils.smplx import SmplxModelCache, run_smplx_inference
+from scaleretarget.utils.smplx import SmplxModelCache, expand_betas, run_smplx_inference
+
+
+def load_motion_data(sample_path):
+    if os.path.splitext(sample_path)[-1] == ".pkl":
+        return joblib.load(sample_path)
+    return np.load(sample_path, allow_pickle=True)
+
 
 class OmomoLoader(BaseLoader):
 
@@ -50,7 +58,7 @@ class OmomoLoader(BaseLoader):
         logger.info(f"[Loader] Total number of motions: {self.data_num}")
 
     def _load_sample(self, sample_path):
-        smplx_data = np.load(sample_path, allow_pickle=True)    
+        smplx_data = load_motion_data(sample_path)
         num_frames = smplx_data['pose_body'].shape[0]
 
         if self.use_optimized_shape:
@@ -61,7 +69,7 @@ class OmomoLoader(BaseLoader):
             body_model = self.body_models.get(smplx_data['gender'])
         smplx_output = run_smplx_inference(
             body_model,
-            betas=betas, # (16,)
+            betas=expand_betas(betas, num_frames),
             global_orient=torch.tensor(smplx_data["root_orient"]).float(), # (N, 3)
             body_pose=torch.tensor(smplx_data["pose_body"]).float(), # (N, 63)
             transl=torch.tensor(smplx_data["trans"]).float(), # (N, 3)
@@ -70,7 +78,7 @@ class OmomoLoader(BaseLoader):
             jaw_pose=torch.zeros(num_frames, 3).float(),
             leye_pose=torch.zeros(num_frames, 3).float(),
             reye_pose=torch.zeros(num_frames, 3).float(),
-            # expression=torch.zeros(num_frames, 10).float(),
+            expression=torch.zeros(num_frames, 10).float(),
             return_full_pose=True,
         )
 

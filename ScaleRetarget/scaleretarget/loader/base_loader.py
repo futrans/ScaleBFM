@@ -16,6 +16,8 @@ class BaseLoader:
         self.overwrite = self.config.get('overwrite', False)
         self.target_fps = self.config.get('target_fps', 30)
         self.output_dir = os.path.expanduser(self.config.get('output_dir', 'retargeted_dataset'))
+        self.failure_count = 0
+        self.failures = []
         
     def load(self, data_path):
         self.data_path = data_path
@@ -65,6 +67,11 @@ class BaseLoader:
                 yield save_path, frames, extras
                 self.current_idx += 1
             except Exception as e:
+                self.failure_count += 1
+                self.failures.append({
+                    "path": self.data_list[self.current_idx],
+                    "error": f"{type(e).__name__}: {e}",
+                })
                 logger.warning(f"[Loader] File {self.data_list[self.current_idx]} is broken! Skip it for error {e}")
                 self.current_idx += 1
 

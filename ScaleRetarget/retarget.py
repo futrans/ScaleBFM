@@ -41,6 +41,7 @@ def main(config: DictConfig) -> None:
     # Load data and align format for retargter
     data_loader = instantiate(config.loader)
     data_loader.load(config.data_path) # lazy loading
+    processing_failure_count = 0
     
     # Perform retargeting
     if config.multi_process:
@@ -92,6 +93,7 @@ def main(config: DictConfig) -> None:
                         success_num += 1
                         logger.info(f"Success/Total: {success_num}/{total_motion_num}")
                     except Exception as e:
+                        processing_failure_count += 1
                         logger.exception(f"Processing error for item: {e}")
 
         producer_thread.join()
@@ -113,6 +115,13 @@ def main(config: DictConfig) -> None:
             logger.info(f"Retargeted motion saved to {save_path}")
 
         retargeter.finish()
+
+    total_failure_count = data_loader.failure_count + processing_failure_count
+    if total_failure_count:
+        raise RuntimeError(
+            f"Retargeting failed for {total_failure_count} motion(s). "
+            f"Loader failures: {data_loader.failures}"
+        )
 
     logger.info(f"Retargeting Done!")
 

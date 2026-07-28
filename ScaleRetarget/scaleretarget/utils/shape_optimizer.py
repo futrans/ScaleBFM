@@ -1,12 +1,12 @@
 import os
 import gc
 import torch
-import smplx
 import numpy as np
 from omegaconf import OmegaConf
 from loguru import logger
 from rich.progress import Progress
 from smplx.joint_names import JOINT_NAMES
+from scaleretarget.utils.smplx import create_smplx_model
 from scipy.spatial.transform import Rotation as R
 from hydra.core.hydra_config import HydraConfig
 
@@ -55,11 +55,8 @@ def optimize_smplx_shape(robot_type,
         device=kinematic_model_device
     )
         
-    smplx_neutral_model = smplx.create(
-        body_model_path,
-        "smplx",
-        gender="neutral",
-        use_pca=False
+    smplx_neutral_model = create_smplx_model(
+        body_model_path, "neutral"
     ).to(kinematic_model_device)
 
     robot_dof_names = kinematic_model.dof_names
