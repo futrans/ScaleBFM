@@ -150,19 +150,20 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
     )
     # write git state to logs
     runner.add_git_repo_to_log(__file__)
-    # save resume path before creating a new log_dir
-    if agent_cfg.resume:
-        # get path to previous checkpoint
-        resume_path = get_checkpoint_path(log_root_path, agent_cfg.load_run, agent_cfg.load_checkpoint)
-        print(f"[INFO]: Loading model checkpoint from: {resume_path}")
-        # load previously trained model
-        runner.load(resume_path)
+    try:
+        # save resume path before creating a new log_dir
+        if agent_cfg.resume:
+            # get path to previous checkpoint
+            resume_path = get_checkpoint_path(log_root_path, agent_cfg.load_run, agent_cfg.load_checkpoint)
+            print(f"[INFO]: Loading model checkpoint from: {resume_path}")
+            # load previously trained model
+            runner.load(resume_path)
 
-    # run training
-    runner.learn(num_learning_iterations=agent_cfg.max_iterations, init_at_random_ep_len=True)
-
-    # close the simulator
-    env.close()
+        # run training
+        runner.learn(num_learning_iterations=agent_cfg.max_iterations, init_at_random_ep_len=True)
+    finally:
+        runner.close()
+        env.close()
 
 
 if __name__ == "__main__":

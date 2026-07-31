@@ -32,6 +32,63 @@ def add_rsl_rl_args(parser: argparse.ArgumentParser):
         "--log_project_name", type=str, default=None, help="Name of the logging project when using wandb or neptune."
     )
     arg_group.add_argument(
+        "--wandb-project",
+        "--wandb_project",
+        dest="wandb_project",
+        type=str,
+        default=None,
+        help="Weights & Biases project. Overrides the runner config and WANDB_PROJECT.",
+    )
+    arg_group.add_argument(
+        "--wandb-entity",
+        "--wandb_entity",
+        dest="wandb_entity",
+        type=str,
+        default=None,
+        help="Weights & Biases entity. Falls back to WANDB_ENTITY.",
+    )
+    arg_group.add_argument(
+        "--wandb-mode",
+        "--wandb_mode",
+        dest="wandb_mode",
+        type=str,
+        default=None,
+        choices={"disabled", "offline", "online"},
+        help="Weights & Biases mode.",
+    )
+    arg_group.add_argument(
+        "--wandb-run-name",
+        "--wandb_run_name",
+        dest="wandb_run_name",
+        type=str,
+        default=None,
+        help="Weights & Biases run name. Defaults to the local log directory name.",
+    )
+    arg_group.add_argument(
+        "--wandb-group",
+        "--wandb_group",
+        dest="wandb_group",
+        type=str,
+        default=None,
+        help="Weights & Biases run group.",
+    )
+    arg_group.add_argument(
+        "--wandb-tag",
+        "--wandb_tag",
+        dest="wandb_tags",
+        action="append",
+        default=None,
+        help="Weights & Biases tag. Repeat the argument to add multiple tags.",
+    )
+    arg_group.add_argument(
+        "--wandb-run-id",
+        "--wandb_run_id",
+        dest="wandb_run_id",
+        type=str,
+        default=None,
+        help="Stable Weights & Biases run ID used to resume the same remote run.",
+    )
+    arg_group.add_argument(
         "--wandb_path", type=str, default=None, help="Name of the logging project when using wandb or neptune."
     )
 
@@ -81,5 +138,19 @@ def update_rsl_rl_cfg(agent_cfg: RslRlOnPolicyRunnerCfg, args_cli: argparse.Name
     if agent_cfg.logger in {"wandb", "neptune"} and args_cli.log_project_name:
         agent_cfg.wandb_project = args_cli.log_project_name
         agent_cfg.neptune_project = args_cli.log_project_name
+    if args_cli.wandb_project is not None:
+        agent_cfg.wandb_project = args_cli.wandb_project
+    if args_cli.wandb_entity is not None:
+        agent_cfg.wandb_entity = args_cli.wandb_entity
+    if args_cli.wandb_mode is not None:
+        agent_cfg.wandb_mode = args_cli.wandb_mode
+    if args_cli.wandb_run_name is not None:
+        agent_cfg.wandb_run_name = args_cli.wandb_run_name
+    if args_cli.wandb_group is not None:
+        agent_cfg.wandb_group = args_cli.wandb_group
+    if args_cli.wandb_tags is not None:
+        agent_cfg.wandb_tags = args_cli.wandb_tags
+    if args_cli.wandb_run_id is not None:
+        agent_cfg.wandb_run_id = args_cli.wandb_run_id
 
     return agent_cfg

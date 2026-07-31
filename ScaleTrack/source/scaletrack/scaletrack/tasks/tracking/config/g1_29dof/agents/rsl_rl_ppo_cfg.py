@@ -26,6 +26,14 @@ class G1BFMTransformerPPORunnerCfg(RslRlOnPolicyRunnerCfg):
     max_iterations = 50000
     save_interval = 1000
     experiment_name = "g1_bfm_tracking_exp"
+    logger = "tensorboard"
+    wandb_project: str | None = None
+    wandb_entity: str | None = None
+    wandb_mode = "disabled"
+    wandb_run_name: str | None = None
+    wandb_group: str | None = None
+    wandb_tags: tuple[str, ...] = ()
+    wandb_run_id: str | None = None
     empirical_normalization = False
     eval_during_training=True
     eval_interval=200

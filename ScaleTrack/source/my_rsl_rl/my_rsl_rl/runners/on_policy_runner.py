@@ -339,6 +339,14 @@ class OnPolicyRunner:
     def add_git_repo_to_log(self, repo_file_path: str) -> None:
         self.git_status_repos.append(repo_file_path)
 
+    def close(self) -> None:
+        """Flush local events and finish the configured external logger."""
+        if self.writer is None:
+            return
+        self.writer.flush()
+        self.writer.close()
+        self.writer = None
+
     def _configure_multi_gpu(self) -> None:
         """Configure multi-gpu training."""
         # Check if distributed training is enabled
