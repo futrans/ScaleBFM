@@ -44,13 +44,13 @@ class WandbSummaryWriter(SummaryWriter):
         self._wandb_run.config.update({"log_dir": log_dir})
 
     def store_config(self, env_cfg: dict | object, runner_cfg: dict, alg_cfg: dict, policy_cfg: dict) -> None:
-        self._wandb_run.config.update({"runner_cfg": runner_cfg})
-        self._wandb_run.config.update({"policy_cfg": policy_cfg})
-        self._wandb_run.config.update({"alg_cfg": alg_cfg})
+        self._wandb_run.config.update({"runner_cfg": runner_cfg}, allow_val_change=True)
+        self._wandb_run.config.update({"policy_cfg": policy_cfg}, allow_val_change=True)
+        self._wandb_run.config.update({"alg_cfg": alg_cfg}, allow_val_change=True)
         try:
-            self._wandb_run.config.update({"env_cfg": env_cfg.to_dict()})
+            self._wandb_run.config.update({"env_cfg": env_cfg.to_dict()}, allow_val_change=True)
         except Exception:
-            self._wandb_run.config.update({"env_cfg": asdict(env_cfg)})
+            self._wandb_run.config.update({"env_cfg": asdict(env_cfg)}, allow_val_change=True)
 
     def add_scalar(
         self,
