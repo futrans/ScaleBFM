@@ -5,13 +5,16 @@
 
 from __future__ import annotations
 
+import json
 import os
 import math
+import signal
 import statistics
 import time
 import torch
 import warnings
 from collections import deque
+from datetime import datetime, timezone
 from tensordict import TensorDict
 from rich.progress import track
 from copy import deepcopy
@@ -24,12 +27,26 @@ from my_rsl_rl.modules import (
     ActorCriticHumanoidTransformer,
 )
 from my_rsl_rl.utils import resolve_obs_groups, store_code_state
+from my_rsl_rl.utils.checkpoint_utils import (
+    aggregate_evaluation_metrics,
+    atomic_copy,
+    atomic_json_save,
+    atomic_torch_save,
+    canonical_sha256,
+    capture_rng_state,
+    restore_rng_state,
+    resume_config_sha256,
+    sha256_file,
+    validation_is_better,
+    write_immutable_json,
+)
 
 
 class OnPolicyRunner:
     """On-policy runner for training and evaluation of actor-critic methods."""
 
     def __init__(self, env: VecEnv, train_cfg: dict, log_dir: str | None = None, device: str = "cpu") -> None:
+        self.original_cfg = deepcopy(train_cfg)
         self.cfg = train_cfg
         self.alg_cfg = train_cfg["algorithm"]
         self.policy_cfg = train_cfg["policy"]
@@ -62,6 +79,15 @@ class OnPolicyRunner:
         self.tot_time = 0
         self.current_learning_iteration = 0
         self.git_status_repos = [my_rsl_rl.__file__]
+        self.best_validation_metrics = None
+        self.best_checkpoint_update = None
+        self.latest_validation_report = None
+        self.evaluation_breakdowns = {}
+        self.source_by_split = self._load_provenance_sources()
+        self.last_checkpoint_update = None
+        self.stop_requested = False
+        self.stop_signal = None
+        self.permanent_checkpoint_interval = int(self.cfg.get("permanent_checkpoint_interval", self.save_interval))
 
         self.eval_during_training = self.cfg["eval_during_training"]
         self.eval_interval = self.cfg["eval_interval"]
@@ -100,85 +126,88 @@ class OnPolicyRunner:
         # Start training
         start_iter = self.current_learning_iteration
         tot_iter = start_iter + num_learning_iterations
-        for it in range(start_iter, tot_iter):
-            eval_dict = None
-            validation_dict = None
+        start_tot_time = self.tot_time
+        previous_signal_handlers = self._install_stop_signal_handlers()
+        try:
+            for it in range(start_iter + 1, tot_iter + 1):
+                eval_dict = None
+                validation_dict = None
 
-            start = time.time()
-            # Rollout
-            with torch.inference_mode():
-                for _ in range(self.num_steps_per_env):
-                    # Sample actions
-                    actions = self.alg.act(obs)
-                    # Step the environment
-                    obs, rewards, dones, extras = self.env.step(actions.to(self.env.device))
-                    # Move to device
-                    obs, rewards, dones = (obs.to(self.device), rewards.to(self.device), dones.to(self.device))
-                    # Process the step
-                    self.alg.process_env_step(obs, rewards, dones, extras)
-                    # Book keeping
-                    if self.log_dir is not None:
-                        if "episode" in extras:
-                            ep_infos.append(extras["episode"])
-                        elif "log" in extras:
-                            ep_infos.append(extras["log"])
-
-                        cur_reward_sum += rewards
-                        # Update episode length
-                        cur_episode_length += 1
-                        # Clear data for completed episodes
-                        new_ids = (dones > 0).nonzero(as_tuple=False)
-                        rewbuffer.extend(cur_reward_sum[new_ids][:, 0].cpu().numpy().tolist())
-                        lenbuffer.extend(cur_episode_length[new_ids][:, 0].cpu().numpy().tolist())
-                        cur_reward_sum[new_ids] = 0
-                        cur_episode_length[new_ids] = 0
-                        
-                stop = time.time()
-                collection_time = stop - start
-                start = stop
-
-                # Compute returns
-                self.alg.compute_returns(obs)
-
-            # Update policy
-            loss_dict = self.alg.update()
-
-            stop = time.time()
-            learn_time = stop - start
-            self.current_learning_iteration = it
-
-            if self.eval_during_training and (it + 1) % self.eval_interval == 0:
-                if self.log_dir is not None and not self.disable_logs:
-                    self.save(os.path.join(self.log_dir, f"model_{it+1}.pt"))
-
+                start = time.time()
+                # Rollout
                 with torch.inference_mode():
-                    eval_dict = self.evaluate_policy(split="train")
-                    validation_dict = self.evaluate_policy(split="validation")
-                    self.env.unwrapped.command_manager.get_term(self.command_name).resample_motions()
-                    self.env.unwrapped.command_manager.get_term(self.command_name).randomize_next_resampling = True
-                    obs, _ = self.env.reset()
+                    for _ in range(self.num_steps_per_env):
+                        # Sample actions
+                        actions = self.alg.act(obs)
+                        # Step the environment
+                        obs, rewards, dones, extras = self.env.step(actions.to(self.env.device))
+                        # Move to device
+                        obs, rewards, dones = (obs.to(self.device), rewards.to(self.device), dones.to(self.device))
+                        # Process the step
+                        self.alg.process_env_step(obs, rewards, dones, extras)
+                        # Book keeping
+                        if self.log_dir is not None:
+                            if "episode" in extras:
+                                ep_infos.append(extras["episode"])
+                            elif "log" in extras:
+                                ep_infos.append(extras["log"])
 
-            if self.log_dir is not None and not self.disable_logs:
-                # Log information
-                self.log(locals())
-                # Save model
-                if it % self.save_interval == 0:
-                    self.save(os.path.join(self.log_dir, f"model_{it}.pt"))
+                            cur_reward_sum += rewards
+                            # Update episode length
+                            cur_episode_length += 1
+                            # Clear data for completed episodes
+                            new_ids = (dones > 0).nonzero(as_tuple=False)
+                            rewbuffer.extend(cur_reward_sum[new_ids][:, 0].cpu().numpy().tolist())
+                            lenbuffer.extend(cur_episode_length[new_ids][:, 0].cpu().numpy().tolist())
+                            cur_reward_sum[new_ids] = 0
+                            cur_episode_length[new_ids] = 0
 
-            # Clear episode infos
-            ep_infos.clear()
-            # Save code state
-            if it == start_iter and not self.disable_logs:
-                # Obtain all the diff files
-                git_file_paths = store_code_state(self.log_dir, self.git_status_repos)
-                # If possible store them to wandb or neptune
-                if self.logger_type in ["wandb", "neptune"] and git_file_paths:
-                    for path in git_file_paths:
-                        self.writer.save_file(path)
+                    stop = time.time()
+                    collection_time = stop - start
+                    start = stop
 
-        # Save the final model after training
-        if self.log_dir is not None and not self.disable_logs:
-            self.save(os.path.join(self.log_dir, f"model_{self.current_learning_iteration}.pt"))
+                    # Compute returns
+                    self.alg.compute_returns(obs)
+
+                # Update policy
+                loss_dict = self.alg.update()
+
+                stop = time.time()
+                learn_time = stop - start
+                self.current_learning_iteration = it
+
+                validation_due = self.eval_during_training and it % self.eval_interval == 0
+                if validation_due:
+                    with torch.inference_mode():
+                        eval_dict = self.evaluate_policy(split="train")
+                        validation_dict = self.evaluate_policy(split="validation")
+                        command = self.env.unwrapped.command_manager.get_term(self.command_name)
+                        command.resample_motions()
+                        command.randomize_next_resampling = True
+                        obs, _ = self.env.reset()
+
+                if self.log_dir is not None and not self.disable_logs:
+                    self.log(locals())
+
+                if validation_due:
+                    self._save_validation_checkpoints(validation_dict)
+
+                # Clear episode infos
+                ep_infos.clear()
+                # Save code state
+                if it == start_iter + 1 and not self.disable_logs:
+                    git_file_paths = store_code_state(self.log_dir, self.git_status_repos)
+                    if self.logger_type in ["wandb", "neptune"] and git_file_paths:
+                        for path in git_file_paths:
+                            self.writer.save_file(path)
+
+                if self._stop_requested_across_ranks():
+                    self._save_terminal_checkpoint("stopped")
+                    break
+            else:
+                self._save_terminal_checkpoint("completed")
+        finally:
+            self._restore_stop_signal_handlers(previous_signal_handlers)
 
     def log(self, locs: dict, width: int = 80, pad: int = 35) -> None:
 
@@ -278,6 +307,10 @@ class OnPolicyRunner:
                 log_string += f"""{f"{key}:":>{pad}} {value:.4f}\n"""
 
         log_string += ep_string
+        completed_in_run = locs["it"] - locs["start_iter"]
+        remaining_in_run = locs["tot_iter"] - locs["it"]
+        elapsed_in_run = self.tot_time - locs["start_tot_time"]
+        eta_seconds = elapsed_in_run / completed_in_run * remaining_in_run
         log_string += (
             f"""{"-" * width}\n"""
             f"""{"Total timesteps:":>{pad}} {self.tot_timesteps}\n"""
@@ -287,44 +320,308 @@ class OnPolicyRunner:
                 time.strftime(
                     "%H:%M:%S",
                     time.gmtime(
-                        self.tot_time
-                        / (locs["it"] - locs["start_iter"] + 1)
-                        * (locs["start_iter"] + locs["num_learning_iterations"] - locs["it"])
+                        eta_seconds
                     ),
                 )
             }\n"""
         )
         print(log_string)
 
-    def save(self, path: str, infos: dict | None = None) -> None:
-        # Save model
-        saved_dict = {
+    def _install_stop_signal_handlers(self) -> dict[int, object]:
+        previous_handlers = {}
+
+        def request_stop(signum, _frame) -> None:
+            self.stop_requested = True
+            self.stop_signal = signal.Signals(signum).name
+            print(f"[ScaleBFM checkpoint] {self.stop_signal} received; stopping after the current PPO update.")
+
+        for signum in (signal.SIGTERM, signal.SIGINT):
+            try:
+                previous_handlers[signum] = signal.getsignal(signum)
+                signal.signal(signum, request_stop)
+            except ValueError:
+                return {}
+        return previous_handlers
+
+    @staticmethod
+    def _restore_stop_signal_handlers(previous_handlers: dict[int, object]) -> None:
+        for signum, handler in previous_handlers.items():
+            signal.signal(signum, handler)
+
+    def _stop_requested_across_ranks(self) -> bool:
+        if not self.is_distributed:
+            return self.stop_requested
+        requested = torch.tensor(int(self.stop_requested), device=self.device)
+        torch.distributed.all_reduce(requested, op=torch.distributed.ReduceOp.MAX)
+        self.stop_requested = bool(requested.item())
+        return self.stop_requested
+
+    def _gather_rng_states(self) -> dict[str, dict]:
+        local_state = capture_rng_state()
+        if not self.is_distributed:
+            return {"0": local_state}
+        gathered = [None] * self.gpu_world_size
+        torch.distributed.all_gather_object(gathered, local_state)
+        return {str(rank): state for rank, state in enumerate(gathered)}
+
+    def _build_checkpoint_payload(self, rng_states: dict[str, dict], infos: dict | None = None) -> dict:
+        command = self.env.unwrapped.command_manager.get_term(self.command_name)
+        return {
+            "schema_version": "scalebfm.scaletrack.checkpoint.v1",
             "model_state_dict": self.alg.policy.state_dict(),
             "actor_optimizer_state_dict": self.alg.actor_optimizer.state_dict(),
             "critic_optimizer_state_dict": self.alg.critic_optimizer.state_dict(),
+            "algorithm_state": {
+                "actor_learning_rate": self.alg.actor_learning_rate,
+                "critic_learning_rate": self.alg.critic_learning_rate,
+            },
+            "completed_updates": self.current_learning_iteration,
             "iter": self.current_learning_iteration,
+            "total_timesteps": self.tot_timesteps,
+            "total_time": self.tot_time,
+            "adaptive_motion_sampling_prob": command.motion_sampling_prob.detach().cpu(),
+            "rng_states": rng_states,
+            "best_validation_metrics": self.best_validation_metrics,
+            "best_checkpoint_update": self.best_checkpoint_update,
+            "latest_validation_report": self.latest_validation_report,
+            "last_checkpoint_update": self.last_checkpoint_update,
+            "runner_config_sha256": canonical_sha256(self.original_cfg),
+            "resume_config_sha256": resume_config_sha256(self.original_cfg),
+            "run_metadata": self.original_cfg.get("run_metadata", {}),
             "infos": infos,
         }
 
-        torch.save(saved_dict, path)
+    def _save_last_checkpoint(self, infos: dict | None = None) -> str | None:
+        self.last_checkpoint_update = self.current_learning_iteration
+        rng_states = self._gather_rng_states()
+        last_path = os.path.join(self.log_dir, "last.pt")
+        if self.gpu_global_rank == 0:
+            atomic_torch_save(self._build_checkpoint_payload(rng_states, infos), last_path)
+        if self.is_distributed:
+            torch.distributed.barrier()
+        return last_path if self.gpu_global_rank == 0 else None
+
+    def _save_validation_checkpoints(self, validation_metrics: dict[str, float]) -> None:
+        report_path = os.path.join(
+            self.log_dir,
+            "validation",
+            f"update_{self.current_learning_iteration:08d}.json",
+        )
+        became_best = False
+        required = {"success_rate", "error_body_pos_g_success"}
+        missing = sorted(required.difference(validation_metrics)) if self.gpu_global_rank == 0 else None
+        if self.is_distributed:
+            missing_payload = [missing]
+            torch.distributed.broadcast_object_list(missing_payload, src=0)
+            missing = missing_payload[0]
+        if missing:
+            raise ValueError(f"validation metrics missing checkpoint selection fields: {missing}")
+
+        if self.gpu_global_rank == 0:
+            became_best = validation_is_better(validation_metrics, self.best_validation_metrics)
+            if became_best:
+                self.best_validation_metrics = dict(validation_metrics)
+                self.best_checkpoint_update = self.current_learning_iteration
+            self.latest_validation_report = report_path
+
+        last_path = self._save_last_checkpoint(
+            {
+                "validation_metrics": validation_metrics if self.gpu_global_rank == 0 else None,
+                "validation_breakdown": self.evaluation_breakdowns.get("validation")
+                if self.gpu_global_rank == 0
+                else None,
+                "validation_report": report_path,
+            }
+        )
+
+        if self.gpu_global_rank != 0:
+            return
+
+        best_path = None
+        if became_best:
+            best_path = str(atomic_copy(last_path, os.path.join(self.log_dir, "best.pt")))
+
+        archive_path = None
+        if self.current_learning_iteration % self.permanent_checkpoint_interval == 0:
+            archive_path = str(
+                atomic_copy(
+                    last_path,
+                    os.path.join(self.log_dir, f"model_{self.current_learning_iteration}.pt"),
+                    immutable=True,
+                )
+            )
+
+        report = {
+            "schema_version": "scalebfm.scaletrack.validation.v1",
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "run_id": os.path.basename(os.path.normpath(self.log_dir)),
+            "completed_updates": self.current_learning_iteration,
+            "total_timesteps": self.tot_timesteps,
+            "metrics": validation_metrics,
+            "stratified_metrics": self.evaluation_breakdowns.get("validation"),
+            "selection_priority": ["success_rate:max", "error_body_pos_g_success:min"],
+            "became_best": became_best,
+            "best_checkpoint_update": self.best_checkpoint_update,
+            "last_checkpoint_path": os.path.abspath(last_path),
+            "last_checkpoint_sha256": sha256_file(last_path),
+            "best_checkpoint_path": os.path.abspath(best_path) if best_path else None,
+            "archive_checkpoint_path": os.path.abspath(archive_path) if archive_path else None,
+            "runner_config_sha256": canonical_sha256(self.original_cfg),
+            "run_metadata": self.original_cfg.get("run_metadata", {}),
+        }
+        write_immutable_json(report, report_path)
+        print(
+            f"[ScaleBFM checkpoint] update={self.current_learning_iteration} "
+            f"last={last_path} best={became_best} archive={archive_path or '-'}"
+        )
+
+    def _save_terminal_checkpoint(self, reason: str) -> None:
+        if self.log_dir is None:
+            return
+        if self.last_checkpoint_update != self.current_learning_iteration:
+            last_path = self._save_last_checkpoint({"terminal_reason": reason})
+        else:
+            last_path = os.path.join(self.log_dir, "last.pt") if self.gpu_global_rank == 0 else None
+            if self.is_distributed:
+                torch.distributed.barrier()
+
+        if self.gpu_global_rank != 0:
+            return
+
+        archive_path = os.path.join(self.log_dir, f"model_{self.current_learning_iteration}.pt")
+        if reason == "completed" and os.path.exists(archive_path):
+            terminal_path = archive_path
+        else:
+            terminal_path = os.path.join(
+                self.log_dir,
+                "checkpoints",
+                f"{reason}_{self.current_learning_iteration:08d}.pt",
+            )
+            atomic_copy(last_path, terminal_path, immutable=True)
+
+        if reason != "stopped":
+            return
+
+        record = {
+            "schema_version": "scalebfm.scaletrack.stop_record.v1",
+            "stopped_at": datetime.now(timezone.utc).isoformat(),
+            "run_id": os.path.basename(os.path.normpath(self.log_dir)),
+            "completed_updates": self.current_learning_iteration,
+            "total_timesteps": self.tot_timesteps,
+            "checkpoint_path": os.path.abspath(terminal_path),
+            "checkpoint_sha256": sha256_file(terminal_path),
+            "validation_report": self.latest_validation_report,
+            "signal": self.stop_signal,
+            "note": os.getenv("SCALEBFM_STOP_NOTE", ""),
+            "runner_config_sha256": canonical_sha256(self.original_cfg),
+            "run_metadata": self.original_cfg.get("run_metadata", {}),
+        }
+        immutable_record = os.path.join(
+            self.log_dir,
+            "checkpoints",
+            f"stop_record_{self.current_learning_iteration:08d}.json",
+        )
+        write_immutable_json(record, immutable_record)
+        atomic_json_save(record, os.path.join(self.log_dir, "stop_record.json"))
+        print(f"[ScaleBFM checkpoint] stop record: {immutable_record}")
+
+    def save(self, path: str, infos: dict | None = None) -> None:
+        rng_states = {str(self.gpu_global_rank): capture_rng_state()}
+        atomic_torch_save(self._build_checkpoint_payload(rng_states, infos), path)
 
         # Upload model to external logging service
         # if self.logger_type in ["neptune", "wandb"] and not self.disable_logs:
         #     self.writer.save_model(path, self.current_learning_iteration)
 
     def load(self, path: str, load_optimizer: bool = True, map_location: str | None = None) -> dict:
-        loaded_dict = torch.load(path, weights_only=False, map_location=map_location)
-        # Load model
-        resumed_training = self.alg.policy.load_state_dict(loaded_dict["model_state_dict"])
-        # Load optimizer if used
-        if load_optimizer and resumed_training:
-            # Algorithm optimizer
+        loaded_dict = torch.load(path, weights_only=False, map_location=map_location or self.device)
+        self._validate_resume_metadata(loaded_dict.get("run_metadata", {}))
+        self._validate_resume_config(loaded_dict)
+        self.alg.policy.load_state_dict(loaded_dict["model_state_dict"])
+        if load_optimizer:
             self.alg.actor_optimizer.load_state_dict(loaded_dict["actor_optimizer_state_dict"])
             self.alg.critic_optimizer.load_state_dict(loaded_dict["critic_optimizer_state_dict"])
-        # Load current learning iteration
-        if resumed_training:
-            self.current_learning_iteration = loaded_dict["iter"]
-        return loaded_dict["infos"]
+            algorithm_state = loaded_dict.get("algorithm_state", {})
+            self.alg.actor_learning_rate = algorithm_state.get(
+                "actor_learning_rate", self.alg.actor_optimizer.param_groups[0]["lr"]
+            )
+            self.alg.critic_learning_rate = algorithm_state.get(
+                "critic_learning_rate", self.alg.critic_optimizer.param_groups[0]["lr"]
+            )
+
+        if "completed_updates" in loaded_dict:
+            self.current_learning_iteration = int(loaded_dict["completed_updates"])
+        else:
+            self.current_learning_iteration = int(loaded_dict["iter"]) + 1
+        self.tot_timesteps = int(loaded_dict.get("total_timesteps", 0))
+        self.tot_time = float(loaded_dict.get("total_time", 0.0))
+        self.best_validation_metrics = loaded_dict.get("best_validation_metrics")
+        self.best_checkpoint_update = loaded_dict.get("best_checkpoint_update")
+        self.latest_validation_report = loaded_dict.get("latest_validation_report")
+        self.last_checkpoint_update = loaded_dict.get("last_checkpoint_update")
+
+        sampling_prob = loaded_dict.get("adaptive_motion_sampling_prob")
+        if sampling_prob is not None:
+            command = self.env.unwrapped.command_manager.get_term(self.command_name)
+            if command.motion_sampling_prob.shape != sampling_prob.shape:
+                raise ValueError(
+                    "checkpoint adaptive motion sampling shape does not match the current training manifest: "
+                    f"{tuple(sampling_prob.shape)} != {tuple(command.motion_sampling_prob.shape)}"
+                )
+            command.motion_sampling_prob.copy_(sampling_prob)
+
+        rank_state = loaded_dict.get("rng_states", {}).get(str(self.gpu_global_rank))
+        if rank_state is not None:
+            restore_rng_state(rank_state)
+        return loaded_dict.get("infos")
+
+    def _validate_resume_metadata(self, saved_metadata: dict) -> None:
+        current_metadata = self.original_cfg.get("run_metadata", {})
+        if not saved_metadata or not current_metadata:
+            return
+        for field in ("distributed_world_size", "num_envs_per_rank"):
+            if saved_metadata.get(field) != current_metadata.get(field):
+                raise ValueError(
+                    f"resume changes frozen resource field {field}: "
+                    f"{saved_metadata.get(field)!r} != {current_metadata.get(field)!r}"
+                )
+        for split in ("train", "validation"):
+            saved_manifest = saved_metadata.get("manifests", {}).get(split, {})
+            current_manifest = current_metadata.get("manifests", {}).get(split, {})
+            if saved_manifest.get("sha256") != current_manifest.get("sha256"):
+                raise ValueError(f"resume changes frozen {split} manifest")
+            if saved_manifest.get("provenance_sha256") != current_manifest.get("provenance_sha256"):
+                raise ValueError(f"resume changes frozen {split} provenance")
+
+    def _validate_resume_config(self, loaded_dict: dict) -> None:
+        saved_sha256 = loaded_dict.get("resume_config_sha256")
+        if saved_sha256 is None:
+            return
+        current_sha256 = resume_config_sha256(self.original_cfg)
+        if saved_sha256 != current_sha256:
+            raise ValueError("resume changes frozen training configuration")
+
+    def _load_provenance_sources(self) -> dict[str, dict[str, str]]:
+        source_by_split = {}
+        manifests = self.original_cfg.get("run_metadata", {}).get("manifests", {})
+        for split, manifest in manifests.items():
+            provenance_path = manifest.get("provenance_path")
+            if not provenance_path:
+                source_by_split[split] = {}
+                continue
+            with open(provenance_path, encoding="utf-8") as stream:
+                rows = [json.loads(line) for line in stream if line.strip()]
+            mapping = {str(row["clip_id"]): str(row["source"]) for row in rows}
+            if len(mapping) != len(rows):
+                raise ValueError(f"duplicate clip IDs in {split} provenance")
+            source_by_split[split] = mapping
+        return source_by_split
+
+    def reset_environment_after_resume(self) -> None:
+        command = self.env.unwrapped.command_manager.get_term(self.command_name)
+        command.randomize_next_resampling = True
+        command.resample_motions()
+        self.env.reset()
 
     def get_inference_policy(self, device: str | None = None) -> callable:
         self.eval_mode()  # Switch to evaluation mode (e.g. for dropout)
@@ -659,6 +956,31 @@ class OnPolicyRunner:
                     command.motion_sampling_prob[:] = new_sampling_prob
             for k in self.eval_metric_keys:
                 metric_dict[k] = metrics[k].detach().mean().item()
+
+        if self.gpu_global_rank == 0:
+            evaluated_motion_ids = torch.arange(command.num_motion) if self.is_distributed else motion_range
+            motion_names = [command.motion_names[index] for index in evaluated_motion_ids.tolist()]
+            mode_ids = None
+            mode_names = []
+            if command.cfg.mode_candidates:
+                mode_ids = command.evaluation_mode_ids[evaluated_motion_ids]
+                mode_names = list(command.cfg.mode_candidates)
+            source_by_motion = self.source_by_split.get(split, {})
+            if source_by_motion:
+                missing_sources = sorted(set(motion_names).difference(source_by_motion))
+                if missing_sources:
+                    raise ValueError(
+                        f"{split} provenance does not cover {len(missing_sources)} evaluated motions; "
+                        f"first missing motion: {missing_sources[0]}"
+                    )
+            self.evaluation_breakdowns[split] = aggregate_evaluation_metrics(
+                metrics,
+                tracking_failures,
+                motion_names,
+                source_by_motion,
+                mode_ids,
+                mode_names,
+            )
     
         self._set_env_no_evaluating(split)
 

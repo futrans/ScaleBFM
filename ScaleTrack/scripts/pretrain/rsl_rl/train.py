@@ -8,7 +8,10 @@
 """Launch Isaac Sim Simulator first."""
 
 import argparse
+import hashlib
+import subprocess
 import sys
+from pathlib import Path
 
 from isaaclab.app import AppLauncher
 
@@ -78,6 +81,52 @@ torch.backends.cuda.matmul.allow_tf32 = True
 torch.backends.cudnn.allow_tf32 = True
 torch.backends.cudnn.deterministic = False
 torch.backends.cudnn.benchmark = False
+
+
+def _sha256_file(path: str) -> str:
+    digest = hashlib.sha256()
+    with open(path, "rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _git_commit(path: Path) -> str | None:
+    result = subprocess.run(
+        ["git", "-C", str(path), "rev-parse", "HEAD"],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    return result.stdout.strip() if result.returncode == 0 else None
+
+
+def _run_metadata(args: argparse.Namespace, num_envs_per_rank: int) -> dict:
+    scalebfm_root = Path(__file__).resolve().parents[4]
+    maskmotion_root = scalebfm_root.parent.parent
+    manifests = {}
+    for split, raw_path in (
+        ("train", args.motion_file),
+        ("validation", args.validation_motion_file),
+    ):
+        if raw_path:
+            path = Path(raw_path).resolve()
+            provenance_path = path.with_name(f"{path.stem}.provenance.jsonl")
+            manifests[split] = {
+                "path": str(path),
+                "sha256": _sha256_file(str(path)),
+                "provenance_path": str(provenance_path) if provenance_path.is_file() else None,
+                "provenance_sha256": _sha256_file(str(provenance_path)) if provenance_path.is_file() else None,
+            }
+    return {
+        "manifests": manifests,
+        "git_commits": {
+            "MaskMotion": _git_commit(maskmotion_root),
+            "ScaleBFM": _git_commit(scalebfm_root),
+        },
+        "distributed_world_size": int(os.getenv("WORLD_SIZE", "1")),
+        "num_envs_per_rank": num_envs_per_rank,
+    }
 
 
 @hydra_task_config(args_cli.task, "rsl_rl_cfg_entry_point")
@@ -152,9 +201,14 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
     env = RslRlVecEnvWrapper(env)
 
     # create runner from rsl-rl
-    runner = OnPolicyRunner(
-        env, agent_cfg.to_dict(), log_dir=log_dir, device=agent_cfg.device
+    runner_cfg = agent_cfg.to_dict()
+    runner_cfg["run_metadata"] = _run_metadata(args_cli, env_cfg.scene.num_envs)
+    print(
+        "[INFO] Resolved logger: "
+        f"type={runner_cfg.get('logger')} "
+        f"wandb_mode={runner_cfg.get('wandb_mode') or os.getenv('WANDB_MODE') or 'online'}"
     )
+    runner = OnPolicyRunner(env, runner_cfg, log_dir=log_dir, device=agent_cfg.device)
     # write git state to logs
     runner.add_git_repo_to_log(__file__)
     try:
@@ -165,9 +219,15 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
             print(f"[INFO]: Loading model checkpoint from: {resume_path}")
             # load previously trained model
             runner.load(resume_path)
+            runner.reset_environment_after_resume()
 
         # run training
-        runner.learn(num_learning_iterations=agent_cfg.max_iterations, init_at_random_ep_len=True)
+        remaining_iterations = max(0, agent_cfg.max_iterations - runner.current_learning_iteration)
+        print(
+            f"[INFO] Training updates: completed={runner.current_learning_iteration} "
+            f"target={agent_cfg.max_iterations} remaining={remaining_iterations}"
+        )
+        runner.learn(num_learning_iterations=remaining_iterations, init_at_random_ep_len=not agent_cfg.resume)
     finally:
         runner.close()
         env.close()
