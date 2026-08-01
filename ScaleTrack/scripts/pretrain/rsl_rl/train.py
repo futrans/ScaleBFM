@@ -98,6 +98,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
 
     env_cfg.commands.motion.motion_file = args_cli.motion_file
     env_cfg.commands.motion.validation_motion_file = args_cli.validation_motion_file
+    env_cfg.commands.motion.debug_vis = args_cli.video
 
     # multi-gpu training configuration
     if args_cli.distributed:
