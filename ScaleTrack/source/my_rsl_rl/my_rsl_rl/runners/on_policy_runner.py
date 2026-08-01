@@ -598,8 +598,18 @@ class OnPolicyRunner:
         if saved_sha256 is None:
             return
         current_sha256 = resume_config_sha256(self.original_cfg)
-        if saved_sha256 != current_sha256:
+        if saved_sha256 == current_sha256:
+            return
+
+        config_with_saved_lineage = deepcopy(self.original_cfg)
+        config_with_saved_lineage["run_metadata"] = loaded_dict.get("run_metadata", {})
+        if saved_sha256 != resume_config_sha256(config_with_saved_lineage):
             raise ValueError("resume changes frozen training configuration")
+
+        saved_commits = loaded_dict.get("run_metadata", {}).get("git_commits", {})
+        current_commits = self.original_cfg.get("run_metadata", {}).get("git_commits", {})
+        if saved_commits != current_commits:
+            print(f"[ScaleBFM checkpoint] code lineage changed on resume: {saved_commits} -> {current_commits}")
 
     def _load_provenance_sources(self) -> dict[str, dict[str, str]]:
         source_by_split = {}
