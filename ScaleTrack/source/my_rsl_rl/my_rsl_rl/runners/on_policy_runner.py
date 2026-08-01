@@ -101,6 +101,8 @@ class OnPolicyRunner:
         start_iter = self.current_learning_iteration
         tot_iter = start_iter + num_learning_iterations
         for it in range(start_iter, tot_iter):
+            eval_dict = None
+            validation_dict = None
 
             start = time.time()
             # Rollout
@@ -150,8 +152,8 @@ class OnPolicyRunner:
                     self.save(os.path.join(self.log_dir, f"model_{it+1}.pt"))
 
                 with torch.inference_mode():
-                    eval_dict = self.evaluate_policy()
-                    eval_test_dict = self.evaluate_policy(test_set=True)
+                    eval_dict = self.evaluate_policy(split="train")
+                    validation_dict = self.evaluate_policy(split="validation")
                     self.env.unwrapped.command_manager.get_term(self.command_name).resample_motions()
                     self.env.unwrapped.command_manager.get_term(self.command_name).randomize_next_resampling = True
                     obs, _ = self.env.reset()
@@ -180,13 +182,13 @@ class OnPolicyRunner:
 
     def log(self, locs: dict, width: int = 80, pad: int = 35) -> None:
 
-        if 'eval_dict' in locs:
+        if locs.get('eval_dict') is not None:
             for key, value in locs['eval_dict'].items():
                 self.writer.add_scalar(f"Eval/{key}", value, locs['it'])
         
-        if 'eval_test_dict' in locs:
-            for key, value in locs['eval_test_dict'].items():
-                self.writer.add_scalar(f"Eval_Test/{key}", value, locs['it'])
+        if locs.get('validation_dict') is not None:
+            for key, value in locs['validation_dict'].items():
+                self.writer.add_scalar(f"Validation/{key}", value, locs['it'])
 
         # Compute the collection size
         collection_size = self.num_steps_per_env * self.env.num_envs * self.gpu_world_size
@@ -446,25 +448,28 @@ class OnPolicyRunner:
             else:
                 raise ValueError("Logger type not found. Please choose 'neptune', 'wandb' or 'tensorboard'.")
 
-    def evaluate_policy(self, test_set=False):
-        if test_set and not self.env.unwrapped.command_manager.get_term(self.command_name).has_test_set:
+    def evaluate_policy(self, split="train"):
+        if split not in {"train", "validation"}:
+            raise ValueError(f"unsupported evaluation split: {split}")
+
+        command = self.env.unwrapped.command_manager.get_term(self.command_name)
+        is_train = split == "train"
+        if split == "validation" and not command.has_validation_set:
             return {}
 
         self.eval_mode()
 
-        self._set_env_is_evaluating(test_set)
+        self._set_env_is_evaluating(split)
 
-        num_motions = self.env.unwrapped.command_manager.get_term(self.command_name).num_motion
-        motion_lengths = self.env.unwrapped.command_manager.get_term(self.command_name).time_totals
+        num_motions = command.num_motion
+        motion_lengths = command.time_totals
         motion_range = torch.argsort(motion_lengths)
         
-        if self.is_distributed and not test_set: # weishuai: we still evaluate the whole test set for each rank
+        if self.is_distributed:
             world_size = self.gpu_world_size
             rank = self.gpu_global_rank
             motion_range = motion_range[rank::world_size] # weishuai: This is to ensure balanced spread of motions of all lengths; Otherwise, some motions may be too long and torch.distributed.barriar may get timed out.
-            num_motions_to_eval = len(motion_range)
-        else:
-            num_motions_to_eval = num_motions
+        num_motions_to_eval = len(motion_range)
 
         assert num_motions_to_eval > 0, f"There should be at least one motion to evaluate!"
 
@@ -490,18 +495,18 @@ class OnPolicyRunner:
             local_idx, motion_ids = motion_map[iter]
             num_motions_this_iter = len(motion_ids)
             
-            self.env.unwrapped.command_manager.get_term(self.command_name).motion_ids[:num_motions_this_iter] = motion_ids
-            self.env.unwrapped.command_manager.get_term(self.command_name).motion_ids[num_motions_this_iter:] = motion_ids[0]
+            command.motion_ids[:num_motions_this_iter] = motion_ids
+            command.motion_ids[num_motions_this_iter:] = motion_ids[0]
             elapsed_time = torch.zeros_like(motion_ids)
 
-            motion_lengths = self.env.unwrapped.command_manager.get_term(self.command_name).time_totals[motion_ids]
+            motion_lengths = command.time_totals[motion_ids]
             if self.eval_max_steps:
                 motion_lengths = torch.clamp(motion_lengths, max=self.eval_max_steps*torch.ones_like(motion_lengths))
             max_length = motion_lengths.max().item()
             
             obs, extras = self.env.reset()
 
-            for l in track(range(max_length), total=max_length, transient=True):
+            for _ in track(range(max_length), total=max_length, transient=True):
                 actions = policy(obs.to(self.device))
                 obs, _, _, _ = self.env.step(actions.to(self.env.device))
 
@@ -510,7 +515,7 @@ class OnPolicyRunner:
                 clip_done = (elapsed_time >= motion_lengths).cpu()
                 clip_not_done = torch.logical_not(clip_done)
 
-                env_metric_dict = self.env.unwrapped.command_manager.get_term(self.command_name).metrics
+                env_metric_dict = command.metrics
                 for k in self.eval_metric_keys:
                     if k not in env_metric_dict:
                         raise ValueError(f"key {k} not found in command manager!")
@@ -527,7 +532,7 @@ class OnPolicyRunner:
                     #     metric[clip_not_done]
                     # )
                     
-        motion_lengths = self.env.unwrapped.command_manager.get_term(self.command_name).time_totals[motion_range]
+        motion_lengths = command.time_totals[motion_range]
         if self.eval_max_steps:
             motion_lengths = torch.clamp(motion_lengths, max=self.eval_max_steps*torch.ones_like(motion_lengths))
         for k in self.eval_metric_keys:
@@ -541,20 +546,23 @@ class OnPolicyRunner:
             tracking_failures = tracking_failures.float()
             failed_motions_index = torch.nonzero(tracking_failures).flatten().tolist()
             failed_motions_id = motion_range[failed_motions_index]
-            motion_names = self.env.unwrapped.command_manager.get_term(self.command_name).motion_names
+            motion_names = command.motion_names
             
-            set_name = "test" if test_set else 'train'
             if self.is_distributed:
-                fail_save_path = os.path.join(self.log_dir, f"failed_{set_name}_motions_rank_{self.gpu_global_rank}.txt")
+                fail_save_path = os.path.join(
+                    self.log_dir,
+                    f"failed_{split}_motions_rank_{self.gpu_global_rank}.txt",
+                )
             else:
-                fail_save_path = os.path.join(self.log_dir, f"failed_{set_name}_motions.txt")
+                fail_save_path = os.path.join(self.log_dir, f"failed_{split}_motions.txt")
             
             with open(fail_save_path, 'w') as f:
                 for index in failed_motions_id:
                     f.write(f"{motion_names[index]}\n")
 
         if self.is_distributed:
-            with open(os.path.join(self.log_dir, f"{self.gpu_global_rank}_metrics.pt"), "wb") as f:
+            metric_path = os.path.join(self.log_dir, f"{split}_{self.gpu_global_rank}_metrics.pt")
+            with open(metric_path, "wb") as f:
                 torch.save(metrics, f)
             
             torch.distributed.barrier()
@@ -562,38 +570,25 @@ class OnPolicyRunner:
             metric_dict = {}
 
             if self.gpu_global_rank == 0:
-                
-                if not test_set:
-                    gathered_metrics = {k: torch.zeros(self.env.unwrapped.command_manager.get_term(self.command_name).num_motion_train) for k in metrics}
+                gathered_metrics = {k: torch.zeros(command.num_motion) for k in metrics}
 
-                    for rank in range(torch.distributed.get_world_size()):
-                        with open(os.path.join(self.log_dir, f"{rank}_metrics.pt"), 'rb') as f:
-                            other_metrics = torch.load(f, map_location="cpu")
-                        
-                        for k in gathered_metrics:
-                            if k == "motion_ids":
-                                gathered_metrics[k][other_metrics["motion_ids"]] += 1
-                            else:
-                                gathered_metrics[k][other_metrics["motion_ids"]] = other_metrics[k]
-                        
-                        os.unlink(os.path.join(self.log_dir, f"{rank}_metrics.pt"))
-                    
-                    metrics = gathered_metrics
-                    assert torch.all(metrics["motion_ids"] == 1.0).item(), f"Some motions in the training set are not evaluated in the training set or evaluated several times!"
-                
-                else:
-                    gathered_metrics = {k: [] for k in metrics}
+                for rank in range(torch.distributed.get_world_size()):
+                    rank_metric_path = os.path.join(self.log_dir, f"{split}_{rank}_metrics.pt")
+                    with open(rank_metric_path, 'rb') as f:
+                        other_metrics = torch.load(f, map_location="cpu")
 
-                    for rank in range(torch.distributed.get_world_size()):
-                        with open(os.path.join(self.log_dir, f"{rank}_metrics.pt"), 'rb') as f:
-                            other_metrics = torch.load(f, map_location="cpu")
-                        
-                        for k in gathered_metrics:
-                            gathered_metrics[k].append(other_metrics[k])
-                        
-                        os.unlink(os.path.join(self.log_dir, f"{rank}_metrics.pt"))
-                    
-                    metrics = {k: torch.cat(gathered_metrics[k], dim=0) for k in gathered_metrics}
+                    for k in gathered_metrics:
+                        if k == "motion_ids":
+                            gathered_metrics[k][other_metrics["motion_ids"]] += 1
+                        else:
+                            gathered_metrics[k][other_metrics["motion_ids"]] = other_metrics[k]
+
+                    os.unlink(rank_metric_path)
+
+                metrics = gathered_metrics
+                assert torch.all(metrics["motion_ids"] == 1.0).item(), (
+                    f"{split} motions must be evaluated exactly once across all ranks"
+                )
 
                 if self.success_metric_dict:
                     example_key = list(self.success_metric_dict.keys())[0]
@@ -615,22 +610,26 @@ class OnPolicyRunner:
                 for k in self.eval_metric_keys:
                     metric_dict[k] = metrics[k].detach().mean().item()
             
-            if not test_set and self.success_metric_dict:
+            if is_train and self.success_metric_dict:
                 if self.gpu_global_rank == 0:
                     failed_idx = (tracking_failures == 1)
                     success_discount = math.pow(self.success_discount_coef, self.eval_interval)
-                    new_sampling_prob = self.env.unwrapped.command_manager.get_term(self.command_name).motion_sampling_prob.clone()
+                    new_sampling_prob = command.motion_sampling_prob.clone()
                     new_sampling_prob[failed_idx] /= success_discount
                     new_sampling_prob[~failed_idx] *= success_discount
                     new_sampling_prob.clamp_(min=0.03, max=1.0)
                     new_sampling_prob_cuda = new_sampling_prob.to(self.device)
                 else:
-                    new_sampling_prob_cuda = torch.zeros(self.env.unwrapped.command_manager.get_term(self.command_name).num_motion_train, dtype=torch.float, device=self.device)
+                    new_sampling_prob_cuda = torch.zeros(
+                        command.num_motion_train,
+                        dtype=torch.float,
+                        device=self.device,
+                    )
                 
                 torch.distributed.broadcast(new_sampling_prob_cuda, src=0)
 
                 new_sampling_prob = new_sampling_prob_cuda.detach().cpu()
-                self.env.unwrapped.command_manager.get_term(self.command_name).motion_sampling_prob[:] = new_sampling_prob
+                command.motion_sampling_prob[:] = new_sampling_prob
 
             torch.distributed.barrier()
 
@@ -650,27 +649,27 @@ class OnPolicyRunner:
                     else:
                         result = 0.0
                     metric_dict[f"{k}_success"] = result
-                if not test_set:
+                if is_train:
                     failed_idx = (tracking_failures == 1)
                     success_discount = math.pow(self.success_discount_coef, self.eval_interval)
-                    new_sampling_prob = self.env.unwrapped.command_manager.get_term(self.command_name).motion_sampling_prob.clone()
+                    new_sampling_prob = command.motion_sampling_prob.clone()
                     new_sampling_prob[failed_idx] /= success_discount
                     new_sampling_prob[~failed_idx] *= success_discount
                     new_sampling_prob.clamp_(min=0.03, max=1.0)
-                    self.env.unwrapped.command_manager.get_term(self.command_name).motion_sampling_prob[:] = new_sampling_prob
+                    command.motion_sampling_prob[:] = new_sampling_prob
             for k in self.eval_metric_keys:
                 metric_dict[k] = metrics[k].detach().mean().item()
     
-        self._set_env_no_evaluating(test_set)
+        self._set_env_no_evaluating(split)
 
         self.train_mode()
 
         return metric_dict
         
-    def _set_env_is_evaluating(self, test_set = False):
-        self.env.unwrapped.command_manager.get_term(self.command_name).is_evaluating = True
-        if test_set:
-            self.env.unwrapped.command_manager.get_term(self.command_name).switch_motion_set(True)
+    def _set_env_is_evaluating(self, split="train"):
+        command = self.env.unwrapped.command_manager.get_term(self.command_name)
+        command.is_evaluating = True
+        command.switch_motion_set(split)
 
         # Disable reset
         for key in self.env.unwrapped.termination_manager.active_terms:
@@ -700,10 +699,10 @@ class OnPolicyRunner:
                     self.obs_noise_cfg[group_name][name] = deepcopy(term.noise)
                     self.env.unwrapped.observation_manager._group_obs_term_cfgs[group_name][i].noise = None
         
-    def _set_env_no_evaluating(self, test_set=False):
-        self.env.unwrapped.command_manager.get_term(self.command_name).is_evaluating = False
-        if test_set:
-            self.env.unwrapped.command_manager.get_term(self.command_name).switch_motion_set(False)
+    def _set_env_no_evaluating(self, split="train"):
+        command = self.env.unwrapped.command_manager.get_term(self.command_name)
+        command.is_evaluating = False
+        command.switch_motion_set("train")
 
         for key in self.env.unwrapped.termination_manager.active_terms:
             term_cfg = self.env.unwrapped.termination_manager.get_term_cfg(key)

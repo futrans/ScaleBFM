@@ -1,6 +1,5 @@
 from __future__ import annotations
 import yaml
-import math
 import os
 import torch
 import pickle
@@ -144,28 +143,32 @@ class MotionCommand(CommandTerm):
         else:
             raise NotImplementedError
         
-        test_motion_file = self.cfg.test_motion_file
-        if test_motion_file:
-            self.has_test_set = True
-            print(f"Loading test set motions from {test_motion_file}")
-            test_motion_file = Path(test_motion_file)
+        validation_motion_file = self.cfg.validation_motion_file
+        if validation_motion_file:
+            self.has_validation_set = True
+            print(f"Loading validation set motions from {validation_motion_file}")
+            validation_motion_file = Path(validation_motion_file)
             
-            if test_motion_file.suffix == ".yaml":
-                with open(test_motion_file, 'r') as f:
-                    test_motions = EasyDict(yaml.load(f, Loader=yaml.SafeLoader))
+            if validation_motion_file.suffix == ".yaml":
+                with open(validation_motion_file, 'r') as f:
+                    validation_motions = EasyDict(yaml.load(f, Loader=yaml.SafeLoader))
                 
-                self.num_motion_test = len(test_motions)
-                self.motion_names_test, self.cat_joint_pos_test, self.cat_joint_vel_test, \
-                    self.cat_body_pos_w_test, self.cat_body_quat_w_test, \
-                        self.cat_body_lin_vel_w_test, self.cat_body_ang_vel_w_test, \
-                            self.time_totals_test = self.load_motions(test_motions, self.body_indexes.cpu().numpy(), set_name="test")
-                self.time_offsets_test = torch.zeros(self.num_motion_test, dtype=torch.long)
-                if self.num_motion_test > 1:
-                    self.time_offsets_test[1:] = torch.cumsum(self.time_totals_test[:-1], dim=0)
+                self.num_motion_validation = len(validation_motions)
+                self.motion_names_validation, self.cat_joint_pos_validation, self.cat_joint_vel_validation, \
+                    self.cat_body_pos_w_validation, self.cat_body_quat_w_validation, \
+                        self.cat_body_lin_vel_w_validation, self.cat_body_ang_vel_w_validation, \
+                            self.time_totals_validation = self.load_motions(
+                                validation_motions,
+                                self.body_indexes.cpu().numpy(),
+                                set_name="validation",
+                            )
+                self.time_offsets_validation = torch.zeros(self.num_motion_validation, dtype=torch.long)
+                if self.num_motion_validation > 1:
+                    self.time_offsets_validation[1:] = torch.cumsum(self.time_totals_validation[:-1], dim=0)
             else:
                 raise NotImplementedError
         else:
-            self.has_test_set = False
+            self.has_validation_set = False
         
         self.cat_joint_pos = self.cat_joint_pos_train
         self.cat_joint_vel = self.cat_joint_vel_train
@@ -205,6 +208,13 @@ class MotionCommand(CommandTerm):
                 for name in link_names:
                     assert name in self.cfg.body_names, f"Link {name} in Mode {mode_name} does not exist in the list of link names given."
                     self._mode_table[mode_idx, self.cfg.body_names.index(name)] = 1
+
+            self.evaluation_mode_ids_train = self._balanced_evaluation_mode_ids(self.motion_names_train)
+            if self.has_validation_set:
+                self.evaluation_mode_ids_validation = self._balanced_evaluation_mode_ids(
+                    self.motion_names_validation
+                )
+            self.evaluation_mode_ids = self.evaluation_mode_ids_train
         
             sampled_mode_ids = torch.randint(0, self._mode_table.shape[0], (self.num_envs,), device=self.device, dtype=torch.long)
             self._mode = self._mode_table[sampled_mode_ids].clone() # (num_envs, num_links)
@@ -608,7 +618,16 @@ class MotionCommand(CommandTerm):
         )
 
         if self.cfg.mode_candidates:
-            sampled_mode_ids = torch.randint(0, self._mode_table.shape[0], (len(env_ids),), device=self.device, dtype=torch.long)
+            if self.is_evaluating:
+                sampled_mode_ids = self.evaluation_mode_ids[self.motion_ids[env_ids_cpu]].to(self.device)
+            else:
+                sampled_mode_ids = torch.randint(
+                    0,
+                    self._mode_table.shape[0],
+                    (len(env_ids),),
+                    device=self.device,
+                    dtype=torch.long,
+                )
             self._mode[env_ids] = self._mode_table[sampled_mode_ids].clone() # (env_ids_len, num_links)
         else:
             self._mode[env_ids] = torch.bernoulli(
@@ -663,21 +682,31 @@ class MotionCommand(CommandTerm):
             self.current_body_visualizers[i].visualize(self.robot_body_pos_w[:, i], self.robot_body_quat_w[:, i])
             self.goal_body_visualizers[i].visualize(self.body_pos_w[:, i], self.body_quat_w[:, i])
 
-    def switch_motion_set(self, train_to_test=True):
-        if train_to_test:
-            self.motion_names = self.motion_names_test
-            self.num_motion = self.num_motion_test
-            self.time_totals = self.time_totals_test
-            self.time_offsets = self.time_offsets_test
-            
-            self.cat_joint_pos = self.cat_joint_pos_test
-            self.cat_joint_vel = self.cat_joint_vel_test
-            self.cat_body_pos_w = self.cat_body_pos_w_test
-            self.cat_body_quat_w = self.cat_body_quat_w_test
-            self.cat_body_lin_vel_w = self.cat_body_lin_vel_w_test
-            self.cat_body_ang_vel_w = self.cat_body_ang_vel_w_test
+    def _balanced_evaluation_mode_ids(self, motion_names: Sequence[str]) -> torch.Tensor:
+        mode_ids = torch.empty(len(motion_names), dtype=torch.long)
+        for position, motion_id in enumerate(sorted(range(len(motion_names)), key=motion_names.__getitem__)):
+            mode_ids[motion_id] = position % self._mode_table.shape[0]
+        return mode_ids
 
-        else:
+    def switch_motion_set(self, split: str):
+        if split == "validation":
+            if not self.has_validation_set:
+                raise ValueError("validation motion set is not configured")
+            self.motion_names = self.motion_names_validation
+            self.num_motion = self.num_motion_validation
+            self.time_totals = self.time_totals_validation
+            self.time_offsets = self.time_offsets_validation
+            
+            self.cat_joint_pos = self.cat_joint_pos_validation
+            self.cat_joint_vel = self.cat_joint_vel_validation
+            self.cat_body_pos_w = self.cat_body_pos_w_validation
+            self.cat_body_quat_w = self.cat_body_quat_w_validation
+            self.cat_body_lin_vel_w = self.cat_body_lin_vel_w_validation
+            self.cat_body_ang_vel_w = self.cat_body_ang_vel_w_validation
+            if self.cfg.mode_candidates:
+                self.evaluation_mode_ids = self.evaluation_mode_ids_validation
+
+        elif split == "train":
             self.motion_names = self.motion_names_train
             self.num_motion = self.num_motion_train
             self.time_totals = self.time_totals_train
@@ -689,6 +718,10 @@ class MotionCommand(CommandTerm):
             self.cat_body_quat_w = self.cat_body_quat_w_train
             self.cat_body_lin_vel_w = self.cat_body_lin_vel_w_train
             self.cat_body_ang_vel_w = self.cat_body_ang_vel_w_train
+            if self.cfg.mode_candidates:
+                self.evaluation_mode_ids = self.evaluation_mode_ids_train
+        else:
+            raise ValueError(f"unsupported motion split: {split}")
 
     def load_motions(self, motions: dict, body_indexes: Sequence[int], set_name: str):
 
@@ -792,7 +825,7 @@ class MotionCommandCfg(CommandTermCfg):
     asset_name: str = MISSING
 
     motion_file: str = MISSING
-    test_motion_file: str = ""
+    validation_motion_file: str = ""
     anchor_body_name: str = MISSING
     body_names: list[str] = MISSING
     mode_candidates: dict[str, list[str]] = {}
