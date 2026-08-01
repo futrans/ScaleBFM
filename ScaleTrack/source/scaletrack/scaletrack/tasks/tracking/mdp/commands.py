@@ -4,14 +4,14 @@ import os
 import torch
 import pickle
 import numpy as np
-import multiprocessing as mp
+import time
 from tqdm import tqdm
 from collections.abc import Sequence
 from dataclasses import MISSING
 from typing import TYPE_CHECKING
 from pathlib import Path
 from easydict import EasyDict
-from concurrent.futures import ProcessPoolExecutor, as_completed
+from concurrent.futures import FIRST_COMPLETED, ProcessPoolExecutor, wait
 from multiprocessing.shared_memory import SharedMemory
 
 from isaaclab.assets import Articulation
@@ -61,6 +61,12 @@ def load_motions_np(motions: dict, body_indexes: Sequence[int]):
 
     motion_count = len(motions)
     motion_items = [(i, name, path, body_indexes) for i, (name, path) in enumerate(motions.items())]
+    load_workers = min(int(os.getenv("SCALETRACK_MOTION_LOAD_WORKERS", "16")), motion_count)
+    print(
+        f"[ScaleTrack motion loader] phase=loading motions={motion_count} "
+        f"workers={load_workers}",
+        flush=True,
+    )
 
     names = [None] * motion_count # weishuai: Pre-allocate to align index;
     joint_pos = [None] * motion_count
@@ -71,31 +77,56 @@ def load_motions_np(motions: dict, body_indexes: Sequence[int]):
     body_ang_vel_w = [None] * motion_count
     time_step_total = [None] * motion_count
             
-    with ProcessPoolExecutor(max_workers=mp.cpu_count()) as executor:
-        futures = {executor.submit(load_motion_data_worker, item): item[0] for item in motion_items}
+    motion_iterator = iter(motion_items)
+    with ProcessPoolExecutor(max_workers=load_workers) as executor:
+        pending = set()
+        for _ in range(min(motion_count, load_workers * 4)):
+            pending.add(executor.submit(load_motion_data_worker, next(motion_iterator)))
+        with tqdm(total=motion_count, desc="Loading motions...") as progress:
+            while pending:
+                completed, pending = wait(pending, return_when=FIRST_COMPLETED)
+                for future in completed:
+                    result = future.result()
+                    if result is None:
+                        raise ValueError(
+                            "Defective motions should be filtered from the dataset to ensure index alignment "
+                            "under distributed training and parallel loading setting!"
+                        )
+                    idx = result["idx"]
+                    names[idx] = result["name"]
+                    joint_pos[idx] = result["joint_pos"]
+                    joint_vel[idx] = result["joint_vel"]
+                    body_pos_w[idx] = result["body_pos_w"]
+                    body_quat_w[idx] = result["body_quat_w"]
+                    body_lin_vel_w[idx] = result["body_lin_vel_w"]
+                    body_ang_vel_w[idx] = result["body_ang_vel_w"]
+                    time_step_total[idx] = result["time_step"]
+                    progress.update(1)
+                    try:
+                        item = next(motion_iterator)
+                    except StopIteration:
+                        continue
+                    pending.add(executor.submit(load_motion_data_worker, item))
 
-        for future in tqdm(as_completed(futures), total=len(futures), desc="Loading motions..."):
-            result = future.result()
-            if result is not None:
-                idx = result["idx"]
-                names[idx] = result["name"]
-                joint_pos[idx] = result["joint_pos"]
-                joint_vel[idx] = result["joint_vel"]
-                body_pos_w[idx] = result["body_pos_w"]
-                body_quat_w[idx] = result["body_quat_w"]
-                body_lin_vel_w[idx] = result["body_lin_vel_w"]
-                body_ang_vel_w[idx] = result["body_ang_vel_w"]
-                time_step_total[idx] = result["time_step"]
-            else:
-                raise ValueError(f"Defective motions should be filtered from the dataset to ensure index alignment under distributed training and parallel loading setting!")
-    
+    def concatenate_chunks(label, chunks):
+        started_at = time.monotonic()
+        print(f"[ScaleTrack motion loader] phase=concatenating field={label}", flush=True)
+        concatenated = np.concatenate(chunks)
+        chunks.clear()
+        print(
+            f"[ScaleTrack motion loader] phase=concatenated field={label} "
+            f"shape={concatenated.shape} elapsed={time.monotonic() - started_at:.1f}s",
+            flush=True,
+        )
+        return concatenated
+
     try:
-        joint_pos_np = np.concatenate(joint_pos)
-        joint_vel_np = np.concatenate(joint_vel)
-        body_pos_w_np = np.concatenate(body_pos_w)
-        body_quat_w_np = np.concatenate(body_quat_w)
-        body_lin_vel_w_np = np.concatenate(body_lin_vel_w)
-        body_ang_vel_w_np = np.concatenate(body_ang_vel_w)
+        joint_pos_np = concatenate_chunks("joint_pos", joint_pos)
+        joint_vel_np = concatenate_chunks("joint_vel", joint_vel)
+        body_pos_w_np = concatenate_chunks("body_pos_w", body_pos_w)
+        body_quat_w_np = concatenate_chunks("body_quat_w", body_quat_w)
+        body_lin_vel_w_np = concatenate_chunks("body_lin_vel_w", body_lin_vel_w)
+        body_ang_vel_w_np = concatenate_chunks("body_ang_vel_w", body_ang_vel_w)
         time_step_total_np = np.array(time_step_total)
     except Exception as e:
         print(f"Gathering operation failed possibly due to contaminated motion data. There is still None placeholder in the array!")
@@ -758,12 +789,18 @@ class MotionCommand(CommandTerm):
                                 for shape, dtype in zip(shapes, dtypes))
                 
                 total_size = metadata_size + data_size + 8
+                shared_memory_name = f"shared_motionlib_{set_name}"
+                print(
+                    f"[ScaleTrack motion loader] phase=allocating_shared_memory "
+                    f"name={shared_memory_name} size_gib={total_size / 1024**3:.2f}",
+                    flush=True,
+                )
 
                 try: 
-                    shm = SharedMemory(name=f"shared_motionlib_{set_name}")
+                    shm = SharedMemory(name=shared_memory_name)
                 except FileNotFoundError:
                     # Create new shared memory
-                    shm = SharedMemory(name=f"shared_motionlib_{set_name}", create=True, size=total_size)
+                    shm = SharedMemory(name=shared_memory_name, create=True, size=total_size)
                     
                     shm.buf[:8] = metadata_size.to_bytes(8, 'little')
                     
@@ -774,10 +811,27 @@ class MotionCommand(CommandTerm):
                     arrays = [joint_pos, joint_vel, body_pos_w, 
                                 body_quat_w, body_lin_vel_w, body_ang_vel_w, time_step_total]
                     
-                    for array in arrays:
-                        array_bytes = array.tobytes()
-                        shm.buf[offset:offset+len(array_bytes)] = array_bytes
-                        offset += len(array_bytes)
+                    for field, array in zip(
+                        (
+                            "joint_pos", "joint_vel", "body_pos_w", "body_quat_w",
+                            "body_lin_vel_w", "body_ang_vel_w", "time_step_total",
+                        ),
+                        arrays,
+                    ):
+                        started_at = time.monotonic()
+                        print(
+                            f"[ScaleTrack motion loader] phase=copying_shared_memory "
+                            f"field={field} size_gib={array.nbytes / 1024**3:.2f}",
+                            flush=True,
+                        )
+                        shared_array = np.ndarray(array.shape, dtype=array.dtype, buffer=shm.buf, offset=offset)
+                        np.copyto(shared_array, array, casting="no")
+                        offset += array.nbytes
+                        print(
+                            f"[ScaleTrack motion loader] phase=copied_shared_memory field={field} "
+                            f"elapsed={time.monotonic() - started_at:.1f}s",
+                            flush=True,
+                        )
                     
                     shm.close()
 

@@ -11,6 +11,7 @@ import argparse
 import hashlib
 import subprocess
 import sys
+from datetime import timedelta
 from pathlib import Path
 
 from isaaclab.app import AppLauncher
@@ -165,7 +166,15 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
         assert gpu_world_size > 1, f"You have enabled distributed training but there is only {gpu_world_size} GPUs detected!"
         
         # weishuai: We init communication at the very beginning instead of the runner as the initialization of some environment components may need sync.
-        torch.distributed.init_process_group(backend="nccl", rank=gpu_global_rank, world_size=gpu_world_size)
+        distributed_timeout_seconds = int(os.getenv("SCALETRACK_DISTRIBUTED_TIMEOUT_SECONDS", "3600"))
+        if gpu_global_rank == 0:
+            print(f"[INFO] Distributed initialization timeout: {distributed_timeout_seconds}s")
+        torch.distributed.init_process_group(
+            backend="nccl",
+            rank=gpu_global_rank,
+            world_size=gpu_world_size,
+            timeout=timedelta(seconds=distributed_timeout_seconds),
+        )
         torch.cuda.set_device(gpu_local_rank)
 
     # specify directory for logging experiments
