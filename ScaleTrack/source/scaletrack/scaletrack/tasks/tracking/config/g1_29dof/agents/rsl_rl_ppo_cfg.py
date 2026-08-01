@@ -29,7 +29,7 @@ class G1BFMTransformerPPORunnerCfg(RslRlOnPolicyRunnerCfg):
     logger = "tensorboard"
     wandb_project: str | None = None
     wandb_entity: str | None = None
-    wandb_mode = "disabled"
+    wandb_mode: str | None = None
     wandb_run_name: str | None = None
     wandb_group: str | None = None
     wandb_tags: tuple[str, ...] = ()
