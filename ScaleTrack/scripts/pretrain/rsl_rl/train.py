@@ -166,7 +166,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
         assert gpu_world_size > 1, f"You have enabled distributed training but there is only {gpu_world_size} GPUs detected!"
         
         # weishuai: We init communication at the very beginning instead of the runner as the initialization of some environment components may need sync.
-        distributed_timeout_seconds = int(os.getenv("SCALETRACK_DISTRIBUTED_TIMEOUT_SECONDS", "3600"))
+        distributed_timeout_seconds = int(os.getenv("SCALETRACK_DISTRIBUTED_TIMEOUT_SECONDS", "10800"))
         if gpu_global_rank == 0:
             print(f"[INFO] Distributed initialization timeout: {distributed_timeout_seconds}s")
         torch.distributed.init_process_group(
