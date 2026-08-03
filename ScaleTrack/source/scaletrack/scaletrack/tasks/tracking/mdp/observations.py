@@ -5,8 +5,13 @@ from typing import TYPE_CHECKING, List
 
 from isaaclab.utils.math import copysign, matrix_from_quat, subtract_frame_transforms, quat_apply, quat_mul, quat_conjugate, euler_xyz_from_quat, quat_apply_inverse, quat_inv
 
+from scaletrack.tasks.tracking.four_arm import (
+    condition_observation,
+    heading_tan_norm_wxyz,
+    mask_conditioned_task_features,
+)
 from scaletrack.tasks.tracking.mdp.commands import MotionCommand
-from scaletrack.utils.torch_utils import calc_heading_quat_inv, quat_to_tan_norm, calc_heading_quat
+from scaletrack.utils.torch_utils import calc_heading_quat_inv, quat_to_tan_norm
 
 if TYPE_CHECKING:
     from isaaclab.envs import ManagerBasedEnv
@@ -78,7 +83,13 @@ def mode(env: ManagerBasedEnv, command_name: str) -> torch.Tensor:
     command: MotionCommand = env.command_manager.get_term(command_name)
     return command.mode
 
-def mode_mapping(env: ManagerBasedEnv, command_name: str, feature_dims_per_link: List[int], with_time: bool = False) -> torch.Tensor:
+def mode_mapping(
+    env: ManagerBasedEnv,
+    command_name: str,
+    feature_dims_per_link: List[int],
+    with_time: bool = False,
+    extra_dims: int = 0,
+) -> torch.Tensor:
     command: MotionCommand = env.command_manager.get_term(command_name)
     mode = command.mode
     
@@ -92,8 +103,81 @@ def mode_mapping(env: ManagerBasedEnv, command_name: str, feature_dims_per_link:
         mappings.append(
             torch.ones(mode.shape[0], 1, device=mode.device, dtype=torch.float)
         )
+    if extra_dims:
+        mappings.append(torch.ones(mode.shape[0], extra_dims, device=mode.device, dtype=torch.float))
 
     return torch.cat(mappings, dim=-1)
+
+
+def four_arm_condition(env: ManagerBasedEnv, command_name: str, future_count: int) -> torch.Tensor:
+    command: MotionCommand = env.command_manager.get_term(command_name)
+    return condition_observation(
+        variant=command.cfg.four_arm_variant,
+        visible=command.four_arm_condition_visible,
+        active=command.four_arm_constraint_active,
+        height=command.four_arm_height,
+        robot_top=command.four_arm_robot_top,
+        future_count=future_count,
+    )
+
+
+def four_arm_target_body_pos_future_to_robot_base_manual(
+    env: ManagerBasedEnv, command_name: str, future_idx: List[int]
+) -> torch.Tensor:
+    command: MotionCommand = env.command_manager.get_term(command_name)
+    values = target_body_pos_future_to_robot_base_manual(env, command_name, future_idx)
+    return mask_conditioned_task_features(
+        values,
+        command.four_arm_conditioned,
+        body_count=len(command.cfg.body_names),
+        features_per_body=3,
+        kept_body_features={command.motion_anchor_body_index: (0, 1)},
+    )
+
+
+def four_arm_target_body_pos_future_rel_to_robot_base_manual(
+    env: ManagerBasedEnv, command_name: str, future_idx: List[int]
+) -> torch.Tensor:
+    command: MotionCommand = env.command_manager.get_term(command_name)
+    values = target_body_pos_future_rel_to_robot_base_manual(env, command_name, future_idx)
+    return mask_conditioned_task_features(
+        values,
+        command.four_arm_conditioned,
+        body_count=len(command.cfg.body_names),
+        features_per_body=3,
+        kept_body_features={},
+    )
+
+
+def four_arm_target_body_rot_future_to_robot_base_manual(
+    env: ManagerBasedEnv, command_name: str, future_idx: List[int]
+) -> torch.Tensor:
+    command: MotionCommand = env.command_manager.get_term(command_name)
+    num_frames = len(future_idx)
+    num_bodies = len(command.cfg.body_names)
+    values = target_body_rot_future_to_robot_base_manual(env, command_name, future_idx)
+    pelvis_yaw = heading_tan_norm_wxyz(
+        command.body_quat_w_future_manual(future_idx)[:, :, command.motion_anchor_body_index],
+        command.robot_anchor_quat_w[:, None, :].expand(-1, num_frames, -1),
+    )
+    shaped = values.view(env.num_envs, num_frames, num_bodies, 6)
+    allowed = torch.zeros_like(shaped)
+    allowed[:, :, command.motion_anchor_body_index] = pelvis_yaw
+    return torch.where(command.four_arm_conditioned[:, None, None, None], allowed, shaped).flatten(start_dim=2)
+
+
+def four_arm_target_body_rot_future_rel_to_robot_base_manual(
+    env: ManagerBasedEnv, command_name: str, future_idx: List[int]
+) -> torch.Tensor:
+    command: MotionCommand = env.command_manager.get_term(command_name)
+    values = target_body_rot_future_rel_to_robot_base_manual(env, command_name, future_idx)
+    return mask_conditioned_task_features(
+        values,
+        command.four_arm_conditioned,
+        body_count=len(command.cfg.body_names),
+        features_per_body=6,
+        kept_body_features={},
+    )
 
 def target_body_pos_future_to_robot_base_manual(env: ManagerBasedEnv, command_name: str, future_idx: List[int]) -> torch.Tensor:
     command: MotionCommand = env.command_manager.get_term(command_name)

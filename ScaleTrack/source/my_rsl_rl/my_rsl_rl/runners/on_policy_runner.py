@@ -364,7 +364,27 @@ class OnPolicyRunner:
         torch.distributed.all_gather_object(gathered, local_state)
         return {str(rank): state for rank, state in enumerate(gathered)}
 
-    def _build_checkpoint_payload(self, rng_states: dict[str, dict], infos: dict | None = None) -> dict:
+    def _local_four_arm_sampler_state(self) -> dict | None:
+        command = self.env.unwrapped.command_manager.get_term(self.command_name)
+        runtime = getattr(command, "four_arm", None)
+        return runtime.state_dict() if runtime is not None else None
+
+    def _gather_four_arm_sampler_states(self) -> dict[str, dict] | None:
+        local_state = self._local_four_arm_sampler_state()
+        if local_state is None:
+            return None
+        if not self.is_distributed:
+            return {"0": local_state}
+        gathered = [None] * self.gpu_world_size
+        torch.distributed.all_gather_object(gathered, local_state)
+        return {str(rank): state for rank, state in enumerate(gathered)}
+
+    def _build_checkpoint_payload(
+        self,
+        rng_states: dict[str, dict],
+        four_arm_sampler_states: dict[str, dict] | None,
+        infos: dict | None = None,
+    ) -> dict:
         command = self.env.unwrapped.command_manager.get_term(self.command_name)
         return {
             "schema_version": "scalebfm.scaletrack.checkpoint.v1",
@@ -381,6 +401,7 @@ class OnPolicyRunner:
             "total_time": self.tot_time,
             "adaptive_motion_sampling_prob": command.motion_sampling_prob.detach().cpu(),
             "rng_states": rng_states,
+            "four_arm_sampler_states": four_arm_sampler_states,
             "best_validation_metrics": self.best_validation_metrics,
             "best_checkpoint_update": self.best_checkpoint_update,
             "latest_validation_report": self.latest_validation_report,
@@ -394,9 +415,13 @@ class OnPolicyRunner:
     def _save_last_checkpoint(self, infos: dict | None = None) -> str | None:
         self.last_checkpoint_update = self.current_learning_iteration
         rng_states = self._gather_rng_states()
+        four_arm_sampler_states = self._gather_four_arm_sampler_states()
         last_path = os.path.join(self.log_dir, "last.pt")
         if self.gpu_global_rank == 0:
-            atomic_torch_save(self._build_checkpoint_payload(rng_states, infos), last_path)
+            atomic_torch_save(
+                self._build_checkpoint_payload(rng_states, four_arm_sampler_states, infos),
+                last_path,
+            )
         if self.is_distributed:
             torch.distributed.barrier()
         return last_path if self.gpu_global_rank == 0 else None
@@ -527,7 +552,16 @@ class OnPolicyRunner:
 
     def save(self, path: str, infos: dict | None = None) -> None:
         rng_states = {str(self.gpu_global_rank): capture_rng_state()}
-        atomic_torch_save(self._build_checkpoint_payload(rng_states, infos), path)
+        local_sampler_state = self._local_four_arm_sampler_state()
+        four_arm_sampler_states = (
+            {str(self.gpu_global_rank): local_sampler_state}
+            if local_sampler_state is not None
+            else None
+        )
+        atomic_torch_save(
+            self._build_checkpoint_payload(rng_states, four_arm_sampler_states, infos),
+            path,
+        )
 
         # Upload model to external logging service
         # if self.logger_type in ["neptune", "wandb"] and not self.disable_logs:
@@ -560,9 +594,9 @@ class OnPolicyRunner:
         self.latest_validation_report = loaded_dict.get("latest_validation_report")
         self.last_checkpoint_update = loaded_dict.get("last_checkpoint_update")
 
+        command = self.env.unwrapped.command_manager.get_term(self.command_name)
         sampling_prob = loaded_dict.get("adaptive_motion_sampling_prob")
         if sampling_prob is not None:
-            command = self.env.unwrapped.command_manager.get_term(self.command_name)
             if command.motion_sampling_prob.shape != sampling_prob.shape:
                 raise ValueError(
                     "checkpoint adaptive motion sampling shape does not match the current training manifest: "
@@ -570,9 +604,60 @@ class OnPolicyRunner:
                 )
             command.motion_sampling_prob.copy_(sampling_prob)
 
+        runtime = getattr(command, "four_arm", None)
+        if runtime is not None:
+            sampler_state = loaded_dict.get("four_arm_sampler_states", {}).get(str(self.gpu_global_rank))
+            if sampler_state is None:
+                raise ValueError("four-arm resume checkpoint is missing the local sampler state")
+            runtime.load_state_dict(sampler_state)
+
         rank_state = loaded_dict.get("rng_states", {}).get(str(self.gpu_global_rank))
         if rank_state is not None:
             restore_rng_state(rank_state)
+        return loaded_dict.get("infos")
+
+    def load_shared_init(self, path: str, map_location: str | None = None) -> dict:
+        loaded_dict = torch.load(path, weights_only=False, map_location=map_location or self.device)
+        shared_init = loaded_dict.get("four_arm_shared_init")
+        if not isinstance(shared_init, dict):
+            raise ValueError("shared-init checkpoint is missing four_arm_shared_init metadata")
+        if shared_init.get("schema_version") != "maskmotion.m5.scalebfm_four_arm_shared_init.v1":
+            raise ValueError("shared-init checkpoint has an unsupported four-arm schema")
+        parity = shared_init.get("projection_parity", {})
+        parity_atol = float(shared_init.get("projection_parity_atol", 1e-5))
+        if not parity or any(
+            float(item.get("max_abs_error", float("inf"))) > parity_atol
+            for item in parity.values()
+        ):
+            raise ValueError("shared-init checkpoint did not preserve zero-input projection parity")
+        self.alg.policy.load_state_dict(loaded_dict["model_state_dict"])
+        self.alg.actor_optimizer.load_state_dict(loaded_dict["actor_optimizer_state_dict"])
+        self.alg.critic_optimizer.load_state_dict(loaded_dict["critic_optimizer_state_dict"])
+        algorithm_state = loaded_dict.get("algorithm_state", {})
+        self.alg.actor_learning_rate = algorithm_state.get(
+            "actor_learning_rate", self.alg.actor_optimizer.param_groups[0]["lr"]
+        )
+        self.alg.critic_learning_rate = algorithm_state.get(
+            "critic_learning_rate", self.alg.critic_optimizer.param_groups[0]["lr"]
+        )
+
+        sampling_prob = loaded_dict.get("adaptive_motion_sampling_prob")
+        if sampling_prob is not None:
+            command = self.env.unwrapped.command_manager.get_term(self.command_name)
+            if command.motion_sampling_prob.shape != sampling_prob.shape:
+                raise ValueError(
+                    "shared-init adaptive motion sampling shape does not match the training manifest: "
+                    f"{tuple(sampling_prob.shape)} != {tuple(command.motion_sampling_prob.shape)}"
+                )
+            command.motion_sampling_prob.copy_(sampling_prob)
+
+        self.current_learning_iteration = 0
+        self.tot_timesteps = 0
+        self.tot_time = 0.0
+        self.best_validation_metrics = None
+        self.best_checkpoint_update = None
+        self.latest_validation_report = None
+        self.last_checkpoint_update = None
         return loaded_dict.get("infos")
 
     def _validate_resume_metadata(self, saved_metadata: dict) -> None:
@@ -592,6 +677,15 @@ class OnPolicyRunner:
                 raise ValueError(f"resume changes frozen {split} manifest")
             if saved_manifest.get("provenance_sha256") != current_manifest.get("provenance_sha256"):
                 raise ValueError(f"resume changes frozen {split} provenance")
+        saved_four_arm = saved_metadata.get("four_arm", {})
+        current_four_arm = current_metadata.get("four_arm", {})
+        if saved_four_arm or current_four_arm.get("variant") not in {None, "off"}:
+            for field in ("variant", "runtime", "schedule_sha256", "geometry_sha256"):
+                if saved_four_arm.get(field) != current_four_arm.get(field):
+                    raise ValueError(f"resume changes frozen four-arm field {field}")
+            for field in ("shared_init_path", "shared_init_sha256"):
+                if field in saved_four_arm and field not in current_four_arm:
+                    current_four_arm[field] = saved_four_arm[field]
 
     def _validate_resume_config(self, loaded_dict: dict) -> None:
         saved_sha256 = loaded_dict.get("resume_config_sha256")
@@ -917,7 +1011,7 @@ class OnPolicyRunner:
                 for k in self.eval_metric_keys:
                     metric_dict[k] = metrics[k].detach().mean().item()
             
-            if is_train and self.success_metric_dict:
+            if is_train and self.success_metric_dict and getattr(command, "four_arm", None) is None:
                 if self.gpu_global_rank == 0:
                     failed_idx = (tracking_failures == 1)
                     success_discount = math.pow(self.success_discount_coef, self.eval_interval)
@@ -956,7 +1050,7 @@ class OnPolicyRunner:
                     else:
                         result = 0.0
                     metric_dict[f"{k}_success"] = result
-                if is_train:
+                if is_train and getattr(command, "four_arm", None) is None:
                     failed_idx = (tracking_failures == 1)
                     success_discount = math.pow(self.success_discount_coef, self.eval_interval)
                     new_sampling_prob = command.motion_sampling_prob.clone()

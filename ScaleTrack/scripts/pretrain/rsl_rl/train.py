@@ -9,6 +9,7 @@
 
 import argparse
 import hashlib
+import json
 import subprocess
 import sys
 from datetime import timedelta
@@ -37,6 +38,27 @@ parser.add_argument(
     help="Validation motion YAML used only for evaluation during training.",
 )
 parser.add_argument("--distributed", action="store_true", default=False, help="Distributed training.")
+parser.add_argument(
+    "--four_arm_variant",
+    choices=("off", "b0", "b1", "c_eq", "c_ub"),
+    default="off",
+    help="Four-arm development variant. 'off' preserves the original ScaleTrack environment.",
+)
+parser.add_argument("--four_arm_schedule_file", type=str, default="", help="Four-arm training schedule manifest.")
+parser.add_argument("--four_arm_geometry_file", type=str, default="", help="Four-arm robot-top geometry sidecar.")
+parser.add_argument(
+    "--shared_init_checkpoint",
+    type=str,
+    default="",
+    help="Expanded shared-init checkpoint for a new four-arm continuation run.",
+)
+parser.add_argument("--four_arm_conditioned_fraction", type=float, default=0.5)
+parser.add_argument("--four_arm_bones_seed_max_fraction", type=float, default=0.6)
+parser.add_argument("--four_arm_pelvis_height_offset_m", type=float, default=0.49)
+parser.add_argument("--four_arm_condition_reward_weight", type=float, default=1.0)
+parser.add_argument("--four_arm_condition_reward_std", type=float, default=0.05)
+parser.add_argument("--four_arm_nonfoot_contact_weight", type=float, default=-0.1)
+parser.add_argument("--four_arm_contact_threshold", type=float, default=1.0)
 
 # append RSL-RL cli arguments
 cli_args.add_rsl_rl_args(parser)
@@ -77,6 +99,7 @@ from isaaclab_tasks.utils.hydra import hydra_task_config
 import scaletrack.tasks  # noqa: F401
 
 from my_rsl_rl.runners.on_policy_runner import OnPolicyRunner
+from scaletrack.tasks.tracking.four_arm_cfg import configure_four_arm_env
 
 torch.backends.cuda.matmul.allow_tf32 = True
 torch.backends.cudnn.allow_tf32 = True
@@ -119,6 +142,27 @@ def _run_metadata(args: argparse.Namespace, num_envs_per_rank: int) -> dict:
                 "provenance_path": str(provenance_path) if provenance_path.is_file() else None,
                 "provenance_sha256": _sha256_file(str(provenance_path)) if provenance_path.is_file() else None,
             }
+    four_arm = {"variant": args.four_arm_variant}
+    four_arm["runtime"] = {
+        "conditioned_fraction": args.four_arm_conditioned_fraction,
+        "bones_seed_max_fraction": args.four_arm_bones_seed_max_fraction,
+        "pelvis_height_offset_m": args.four_arm_pelvis_height_offset_m,
+        "condition_reward_weight": args.four_arm_condition_reward_weight,
+        "condition_reward_std": args.four_arm_condition_reward_std,
+        "nonfoot_contact_weight": args.four_arm_nonfoot_contact_weight,
+        "contact_threshold": args.four_arm_contact_threshold,
+        "sampler_seed": args.seed,
+        "sampler_rank": int(os.getenv("RANK", "0")),
+    }
+    for field, raw_path in (
+        ("schedule", args.four_arm_schedule_file),
+        ("geometry", args.four_arm_geometry_file),
+        ("shared_init", args.shared_init_checkpoint),
+    ):
+        if raw_path:
+            path = Path(raw_path).resolve()
+            four_arm[f"{field}_path"] = str(path)
+            four_arm[f"{field}_sha256"] = _sha256_file(str(path))
     return {
         "manifests": manifests,
         "git_commits": {
@@ -127,6 +171,7 @@ def _run_metadata(args: argparse.Namespace, num_envs_per_rank: int) -> dict:
         },
         "distributed_world_size": int(os.getenv("WORLD_SIZE", "1")),
         "num_envs_per_rank": num_envs_per_rank,
+        "four_arm": four_arm,
     }
 
 
@@ -149,6 +194,26 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
     env_cfg.commands.motion.motion_file = args_cli.motion_file
     env_cfg.commands.motion.validation_motion_file = args_cli.validation_motion_file
     env_cfg.commands.motion.debug_vis = args_cli.video
+    if args_cli.four_arm_variant != "off":
+        configure_four_arm_env(
+            env_cfg,
+            variant=args_cli.four_arm_variant,
+            schedule_file=args_cli.four_arm_schedule_file,
+            geometry_file=args_cli.four_arm_geometry_file,
+            conditioned_fraction=args_cli.four_arm_conditioned_fraction,
+            bones_seed_max_fraction=args_cli.four_arm_bones_seed_max_fraction,
+            pelvis_height_offset_m=args_cli.four_arm_pelvis_height_offset_m,
+            condition_reward_weight=args_cli.four_arm_condition_reward_weight,
+            condition_reward_std=args_cli.four_arm_condition_reward_std,
+            nonfoot_contact_weight=args_cli.four_arm_nonfoot_contact_weight,
+            contact_threshold=args_cli.four_arm_contact_threshold,
+            sampler_seed=args_cli.seed,
+            sampler_rank=int(os.getenv("RANK", "0")),
+        )
+    elif args_cli.shared_init_checkpoint:
+        raise ValueError("--shared_init_checkpoint requires an active --four_arm_variant")
+    if agent_cfg.resume and args_cli.shared_init_checkpoint:
+        raise ValueError("resume and shared-init are mutually exclusive")
 
     # multi-gpu training configuration
     if args_cli.distributed:
@@ -218,6 +283,15 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
         f"wandb_mode={runner_cfg.get('wandb_mode') or os.getenv('WANDB_MODE') or 'online'}"
     )
     runner = OnPolicyRunner(env, runner_cfg, log_dir=log_dir, device=agent_cfg.device)
+    if args_cli.four_arm_variant != "off":
+        command = env.unwrapped.command_manager.get_term("motion")
+        receipt = command.four_arm.sampler_receipt()
+        receipt["run_metadata"] = runner_cfg["run_metadata"]
+        rank = int(os.getenv("RANK", "0"))
+        receipt_path = Path(log_dir) / f"four_arm_sampler_receipt.rank-{rank:05d}.json"
+        receipt_path.parent.mkdir(parents=True, exist_ok=True)
+        receipt_path.write_text(json.dumps(receipt, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        print(f"[ScaleBFM four-arm] sampler receipt: {receipt_path}")
     # write git state to logs
     runner.add_git_repo_to_log(__file__)
     try:
@@ -228,6 +302,10 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
             print(f"[INFO]: Loading model checkpoint from: {resume_path}")
             # load previously trained model
             runner.load(resume_path)
+            runner.reset_environment_after_resume()
+        elif args_cli.shared_init_checkpoint:
+            print(f"[INFO]: Loading four-arm shared init from: {args_cli.shared_init_checkpoint}")
+            runner.load_shared_init(args_cli.shared_init_checkpoint)
             runner.reset_environment_after_resume()
 
         # run training

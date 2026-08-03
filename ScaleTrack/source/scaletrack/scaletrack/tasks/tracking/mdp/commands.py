@@ -29,6 +29,8 @@ from isaaclab.utils.math import (
     yaw_quat,
 )
 
+from scaletrack.tasks.tracking.four_arm import FourArmRuntime, robot_top_from_geometry
+
 if TYPE_CHECKING:
     from isaaclab.envs import ManagerBasedRLEnv
 
@@ -228,6 +230,11 @@ class MotionCommand(CommandTerm):
         self.metrics["error_body_rot_relative"] = torch.zeros(self.num_envs,device=self.device)
         self.metrics["error_joint_pos"] = torch.zeros(self.num_envs, device=self.device)
         self.metrics["error_joint_vel"] = torch.zeros(self.num_envs, device=self.device)
+        self.metrics["four_arm_conditioned"] = torch.zeros(self.num_envs, device=self.device)
+        self.metrics["four_arm_condition_visible"] = torch.zeros(self.num_envs, device=self.device)
+        self.metrics["four_arm_constraint_active"] = torch.zeros(self.num_envs, device=self.device)
+        self.metrics["four_arm_condition_abs_error"] = torch.zeros(self.num_envs, device=self.device)
+        self.metrics["four_arm_upper_bound_violation"] = torch.zeros(self.num_envs, device=self.device)
 
         self.is_evaluating = False
         self.randomize_next_resampling = True
@@ -263,11 +270,30 @@ class MotionCommand(CommandTerm):
         )
 
         self._future_manual_cache: dict[tuple[int, ...], dict[str, torch.Tensor]] = {}
+        self._four_arm_robot_top_cache: torch.Tensor | None = None
+
+        self.four_arm: FourArmRuntime | None = None
+        if self.cfg.four_arm_variant != "off":
+            self.four_arm = FourArmRuntime(
+                variant=self.cfg.four_arm_variant,
+                schedule_path=self.cfg.four_arm_schedule_file,
+                geometry_path=self.cfg.four_arm_geometry_file,
+                motion_names=self.motion_names_train,
+                robot_body_names=self.robot.body_names,
+                num_envs=self.num_envs,
+                device=self.device,
+                conditioned_fraction=self.cfg.four_arm_conditioned_fraction,
+                bones_seed_max_fraction=self.cfg.four_arm_bones_seed_max_fraction,
+                sampler_seed=self.cfg.four_arm_sampler_seed,
+                sampler_rank=self.cfg.four_arm_sampler_rank,
+            )
 
         self.resample_motions()
 
     def resample_motions(self):
         self.motion_ids[:] = torch.multinomial(self.motion_sampling_prob, num_samples=self.num_envs, replacement=True)
+        if self.four_arm is not None and not self.is_evaluating:
+            self.four_arm.sample_conditioned(torch.arange(self.num_envs), self.motion_ids)
         
         sampling_probabilities = self.motion_sampling_prob / self.motion_sampling_prob.sum().clamp_min(1e-12)
 
@@ -323,7 +349,10 @@ class MotionCommand(CommandTerm):
                 cache["frame_offsets"] = self._future_frame_offsets_manual(future_idx)
             body_pos_all = self._gather_cat_by_global_indices(self.cat_body_pos_w, global_indices).to(self.device)
             body_pos_all = body_pos_all + self._env.scene.env_origins[:, None, None, :]
-            cache["body_pos_w_future"] = body_pos_all
+            cache["body_pos_w_future"] = self._apply_four_arm_pelvis_target(
+                body_pos_all,
+                self.time_steps.unsqueeze(-1) + cache["frame_offsets"],
+            )
         return cache["body_pos_w_future"]
 
     def body_quat_w_future_manual(self, future_idx: Sequence[int]) -> torch.Tensor:
@@ -390,7 +419,8 @@ class MotionCommand(CommandTerm):
 
     @property
     def body_pos_w(self) -> torch.Tensor:
-        return self.cat_body_pos_w[self._global_time_index()].to(self.device) + self._env.scene.env_origins[:, None, :]
+        body_pos = self.cat_body_pos_w[self._global_time_index()].to(self.device) + self._env.scene.env_origins[:, None, :]
+        return self._apply_four_arm_pelvis_target(body_pos, self.time_steps)
 
     @property
     def body_quat_w(self) -> torch.Tensor:
@@ -568,7 +598,68 @@ class MotionCommand(CommandTerm):
     def mode(self) -> torch.Tensor:
         return self._mode
 
+    @property
+    def four_arm_conditioned(self) -> torch.Tensor:
+        if self.four_arm is None or self.is_evaluating:
+            return torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
+        return self.four_arm.conditioned_mask
+
+    @property
+    def four_arm_condition_visible(self) -> torch.Tensor:
+        if self.four_arm is None or self.is_evaluating:
+            return torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
+        return self.four_arm.support(self.time_steps, device=self.device)[0]
+
+    @property
+    def four_arm_constraint_active(self) -> torch.Tensor:
+        if self.four_arm is None or self.is_evaluating:
+            return torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
+        return self.four_arm.support(self.time_steps, device=self.device)[1]
+
+    @property
+    def four_arm_height(self) -> torch.Tensor:
+        if self.four_arm is None or self.is_evaluating:
+            return torch.zeros(self.num_envs, dtype=torch.float32, device=self.device)
+        return self.four_arm.support(self.time_steps, device=self.device)[2]
+
+    @property
+    def four_arm_robot_top(self) -> torch.Tensor:
+        if self.four_arm is None:
+            return torch.zeros(self.num_envs, dtype=torch.float32, device=self.device)
+        if self._four_arm_robot_top_cache is None:
+            body_pos = self.robot.data.body_pos_w.index_select(1, self.four_arm.body_ids)
+            body_quat = self.robot.data.body_quat_w.index_select(1, self.four_arm.body_ids)
+            self._four_arm_robot_top_cache = robot_top_from_geometry(
+                body_pos, body_quat, self.four_arm.corners, self.four_arm.valid_corners
+            )
+        return self._four_arm_robot_top_cache
+
+    def _apply_four_arm_pelvis_target(self, body_pos: torch.Tensor, time_steps: torch.Tensor) -> torch.Tensor:
+        if self.four_arm is None or self.is_evaluating or self.cfg.four_arm_variant not in {"b0", "b1"}:
+            return body_pos
+        _, active, height = self.four_arm.support(time_steps, device=self.device)
+        if not bool(active.any()):
+            return body_pos
+        result = body_pos.clone()
+        target = height - self.cfg.four_arm_pelvis_height_offset_m
+        if result.ndim == 3:
+            target = target + self._env.scene.env_origins[:, 2]
+            result[:, self.motion_anchor_body_index, 2] = torch.where(
+                active,
+                target,
+                result[:, self.motion_anchor_body_index, 2],
+            )
+        else:
+            target = target + self._env.scene.env_origins[:, None, 2]
+            result[:, :, self.motion_anchor_body_index, 2] = torch.where(
+                active,
+                target,
+                result[:, :, self.motion_anchor_body_index, 2],
+            )
+        return result
+
     def _update_metrics(self):
+        self._four_arm_robot_top_cache = None
         self.metrics["error_anchor_height"] = torch.abs(self.anchor_pos_w[..., 2] - self.robot_anchor_pos_w[..., 2])
         self.metrics["error_anchor_pos"] = torch.norm(self.anchor_pos_w - self.robot_anchor_pos_w, dim=-1)
         self.metrics["error_anchor_rot"] = quat_error_magnitude(self.anchor_quat_w, self.robot_anchor_quat_w)
@@ -599,20 +690,39 @@ class MotionCommand(CommandTerm):
 
         self.metrics["error_joint_pos"] = torch.norm(self.joint_pos - self.robot_joint_pos, dim=-1)
         self.metrics["error_joint_vel"] = torch.norm(self.joint_vel - self.robot_joint_vel, dim=-1)
+        active = self.four_arm_constraint_active
+        error = self.four_arm_robot_top - self.four_arm_height
+        self.metrics["four_arm_conditioned"] = self.four_arm_conditioned.to(torch.float32)
+        self.metrics["four_arm_condition_visible"] = self.four_arm_condition_visible.to(torch.float32)
+        self.metrics["four_arm_constraint_active"] = active.to(torch.float32)
+        self.metrics["four_arm_condition_abs_error"] = torch.where(active, torch.abs(error), torch.zeros_like(error))
+        self.metrics["four_arm_upper_bound_violation"] = torch.where(
+            active, torch.clamp_min(error, 0.0), torch.zeros_like(error)
+        )
 
     def _resample_command(self, env_ids: Sequence[int]):
         if len(env_ids) == 0:
             return
         
         env_ids_cpu = env_ids.cpu()
+        if self.four_arm is not None and not self.is_evaluating:
+            self.four_arm.sample_conditioned(env_ids_cpu, self.motion_ids)
         if not self.is_evaluating:
             motion_len = self.time_totals.gather(0, self.motion_ids[env_ids_cpu])
-            if self.randomize_next_resampling:
-                phase = torch.rand(self.motion_ids[env_ids_cpu].shape)
-                self.time_steps[env_ids_cpu] = (phase * (motion_len.float() - 1)).long()
-                self.randomize_next_resampling = False
-            else:
-                self.time_steps[env_ids_cpu] = (self.time_steps[env_ids_cpu] + 1) % motion_len # weishuai: pick up from where it fails
+            ordinary = torch.ones(len(env_ids_cpu), dtype=torch.bool)
+            if self.four_arm is not None:
+                conditioned = self.four_arm.conditioned_mask_cpu[env_ids_cpu]
+                ordinary = ~conditioned
+                self.time_steps[env_ids_cpu[conditioned]] = self.four_arm.visible_start_for(env_ids_cpu[conditioned])
+            if bool(ordinary.any()):
+                ordinary_ids = env_ids_cpu[ordinary]
+                ordinary_len = motion_len[ordinary]
+                if self.randomize_next_resampling:
+                    phase = torch.rand(ordinary_len.shape)
+                    self.time_steps[ordinary_ids] = (phase * (ordinary_len.float() - 1)).long()
+                else:
+                    self.time_steps[ordinary_ids] = (self.time_steps[ordinary_ids] + 1) % ordinary_len
+            self.randomize_next_resampling = False
         else:
             self.time_steps[env_ids_cpu] = 0
 
@@ -660,6 +770,10 @@ class MotionCommand(CommandTerm):
                     dtype=torch.long,
                 )
             self._mode[env_ids] = self._mode_table[sampled_mode_ids].clone() # (env_ids_len, num_links)
+            if self.four_arm is not None and not self.is_evaluating:
+                conditioned = self.four_arm.conditioned_mask_cpu[env_ids_cpu].to(self.device)
+                pelvis_mode_id = list(self.cfg.mode_candidates).index("Pelvis-1")
+                self._mode[env_ids[conditioned]] = self._mode_table[pelvis_mode_id]
         else:
             self._mode[env_ids] = torch.bernoulli(
                 torch.ones(
@@ -673,6 +787,7 @@ class MotionCommand(CommandTerm):
         )
 
         self._future_manual_cache.clear()
+        self._four_arm_robot_top_cache = None
 
     def _update_command(self):
         self.time_steps += 1
@@ -883,6 +998,15 @@ class MotionCommandCfg(CommandTermCfg):
     anchor_body_name: str = MISSING
     body_names: list[str] = MISSING
     mode_candidates: dict[str, list[str]] = {}
+
+    four_arm_variant: str = "off"
+    four_arm_schedule_file: str = ""
+    four_arm_geometry_file: str = ""
+    four_arm_conditioned_fraction: float = 0.5
+    four_arm_bones_seed_max_fraction: float = 0.6
+    four_arm_pelvis_height_offset_m: float = 0.49
+    four_arm_sampler_seed: int = 42
+    four_arm_sampler_rank: int = 0
 
     pose_range: dict[str, tuple[float, float]] = {}
     velocity_range: dict[str, tuple[float, float]] = {}

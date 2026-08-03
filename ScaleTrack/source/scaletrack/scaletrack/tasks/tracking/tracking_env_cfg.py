@@ -130,6 +130,7 @@ class BFMMaskObservationCfg:
         target_body_rot = ObsTerm(func=mdp.target_body_rot_future_to_robot_base_manual, params={"command_name": "motion","future_idx": [0,1,2,3,4,-1]}, noise=Unoise(n_min=-0.05, n_max=0.05))
         target_body_rot_rel = ObsTerm(func=mdp.target_body_rot_future_rel_to_robot_base_manual, params={"command_name": "motion","future_idx": [0,1,2,3,4,-1]}, noise=Unoise(n_min=-0.05, n_max=0.05))
         timestamp = ObsTerm(func=mdp.ref_motion_time_offsets_future_manual, params={"command_name": "motion","future_idx": [0,1,2,3,4,-1]})
+        four_arm_condition = None
 
         def __post_init__(self):
             self.enable_corruption = True
@@ -157,6 +158,7 @@ class BFMMaskObservationCfg:
         target_body_vel_rel = ObsTerm(func=mdp.target_body_vel_future_rel_to_robot_base_manual, params={"command_name": "motion","future_idx": [0,1,2,4,8,16,32]})
         target_body_ang_vel_rel = ObsTerm(func=mdp.target_body_ang_vel_future_rel_to_robot_base_manual, params={"command_name": "motion","future_idx": [0,1,2,4,8,16,32]})
         timestamp = ObsTerm(func=mdp.ref_motion_time_offsets_future_manual, params={"command_name": "motion","future_idx": [0,1,2,4,8,16,32]})
+        four_arm_condition = None
 
     @configclass
     class ActionCfg(ObsGroup):
@@ -278,6 +280,8 @@ class RewardsCfg:
         func=mdp.is_alive,
         weight=1.0,
     )
+    four_arm_condition = None
+    four_arm_nonfoot_contact = None
 
 ## Termination Config
 
